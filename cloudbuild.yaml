@@ -1,0 +1,34 @@
+steps:
+  # Dockerイメージをビルド
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/yiwu-scraper', '.']
+  
+  # Google Container Registryにプッシュ
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/yiwu-scraper']
+  
+  # Cloud Runにデプロイ
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'yiwu-scraper'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/yiwu-scraper'
+      - '--platform'
+      - 'managed'
+      - '--region'
+      - 'asia-northeast1'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'YIWU_USERNAME=kochatomoki@gmail.com,YIWU_PASSWORD=Yamada0402,GOOGLE_SHEETS_CREDENTIALS_JSON=service_account.json,GOOGLE_SHEETS_SPREADSHEET_ID=1Dvz3cS9DRGx4woEY0NNypgLPKxLZ55a4j8778YlCFls,GOOGLE_SHEETS_WORKSHEET=yiwu'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '2'
+      - '--timeout'
+      - '3600'
+
+images:
+  - 'gcr.io/$PROJECT_ID/yiwu-scraper'
