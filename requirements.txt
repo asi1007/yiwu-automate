@@ -1,5 +1,9 @@
 playwright
 gspread
 google-auth
+google-api-python-client
 python-dotenv
-
+functions-framework
+pandas
+openpyxl
+python-dateutil
