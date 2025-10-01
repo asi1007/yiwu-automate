@@ -2,6 +2,7 @@ import time
 import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from slack_notifier import SlackNotifier
 
 # Google Sheets に書き出し
 SHEET_CREDENTIALS =  "service_account.json"
@@ -31,6 +32,9 @@ class GSheet:
 		self.service = build('sheets', 'v4', credentials=creds)
 		self.spreadsheet_id = SPREADSHEET_ID
 		self.sheet_id = self.ws.id
+
+		# Slack通知の初期化
+		self.slack_notifier = SlackNotifier()
 		return
 
 	def get_table_id(self):
@@ -127,6 +131,7 @@ class GSheet:
 
 		for row_data in data_rows:
 			order_id = row_data[1]  # 注文番号（2列目）
+			new_arrival_date = row_data[5] if len(row_data) > 5 else ""  # F列（中国事務所到着日）
 
 			if order_id in existing_orders:
 				# 既存の注文番号がある場合
@@ -140,6 +145,10 @@ class GSheet:
 						range_name = f"A{row_index}:{chr(64+end_col)}{row_index}"
 						self.ws.update(range_name, [row_data])
 						print(f"注文番号 {order_id} のF列が空のため更新しました")
+
+						# F列が空から値ありに変更された場合、Slack通知を送信
+						if new_arrival_date and new_arrival_date.strip():
+							self.slack_notifier.send_arrival_notification(order_id, new_arrival_date)
 					else:
 						print(f"注文番号 {order_id} のF列に既に値があるためスキップしました")
 			else:
@@ -147,6 +156,10 @@ class GSheet:
 				self.ws.append_row(row_data)
 				print(f"新しい注文番号 {order_id} を追加しました")
 				max_row += 1  # 新規行が追加されたので行数を増やす
+
+				# 新規追加時にF列に値がある場合もSlack通知を送信
+				if new_arrival_date and new_arrival_date.strip():
+					self.slack_notifier.send_arrival_notification(order_id, new_arrival_date)
 
 		# データ書き込み後、テーブル範囲を拡張
 		if max_row > 0:
