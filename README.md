@@ -8,6 +8,7 @@
 - 注文状況照会ページから全ページのデータを取得
 - 各注文の詳細ページから商品リンクを取得
 - Google Sheetsに結果を出力
+- 中国事務所到着日の更新時にSlack通知（オプション）
 
 ## 必要な環境変数
 
@@ -30,6 +31,9 @@ YIWU_PASSWORD=your-password
 GOOGLE_SHEETS_CREDENTIALS_JSON=service_account.json
 GOOGLE_SHEETS_SPREADSHEET_ID=your-spreadsheet-id
 GOOGLE_SHEETS_WORKSHEET=yiwu
+
+# Slack 通知設定（オプション）
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
 ```
 
 **注意**: `.env`ファイルは機密情報を含むため、Gitにコミットしないでください。
@@ -42,6 +46,7 @@ export YIWU_PASSWORD="your-password"
 export GOOGLE_SHEETS_CREDENTIALS_JSON="service_account.json"
 export GOOGLE_SHEETS_SPREADSHEET_ID="your-spreadsheet-id"
 export GOOGLE_SHEETS_WORKSHEET="yiwu"
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
 ```
 
 ## ローカル実行
@@ -75,6 +80,24 @@ python yiwu_scraper.py
 ```bash
 gcloud builds submit --config cloudbuild.yaml
 ```
+
+## Slack通知の設定（オプション）
+
+中国事務所到着日の更新時にSlackへ通知を送信できます。
+
+### 設定手順
+
+1. Slack Workspaceで[Incoming Webhooks](https://api.slack.com/messaging/webhooks)を作成
+2. Webhook URLを取得
+3. 環境変数`SLACK_WEBHOOK_URL`にWebhook URLを設定
+
+### 通知のタイミング
+
+以下の場合にSlack通知が送信されます：
+- 既存の注文番号で、中国事務所到着日（F列）が空欄から値ありに変更された場合
+- 新規注文で、中国事務所到着日に初めから値が入っている場合
+
+**注意**: `SLACK_WEBHOOK_URL`が設定されていない場合、通知機能は無効化され、エラーなく動作します。
 
 ## 必要な権限
 
