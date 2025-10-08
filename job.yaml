@@ -1,0 +1,30 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: yiwu-scraper
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    spec:
+      template:
+        spec:
+          containers:
+          - image: asia-northeast1-docker.pkg.dev/PROJECT_ID/yiwu-scraper/yiwu-scraper
+            env:
+            - name: YIWU_USERNAME
+              value: "kochatomoki@gmail.com"
+            - name: YIWU_PASSWORD
+              value: "Yamada0402"
+            - name: GOOGLE_SHEETS_CREDENTIALS_JSON
+              value: "service_account.json"
+            - name: GOOGLE_SHEETS_SPREADSHEET_ID
+              value: "1Dvz3cS9DRGx4woEY0NNypgLPKxLZ55a4j8778YlCFls"
+            - name: GOOGLE_SHEETS_WORKSHEET
+              value: "yiwu"
+            resources:
+              limits:
+                cpu: 2000m
+                memory: 2Gi
+          restartPolicy: Never
+          timeoutSeconds: 3600
