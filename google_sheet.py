@@ -1,9 +1,11 @@
 """Google Sheetsへのデータ書き込みモジュール"""
 import os
 import logging
+import time
 import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from slack_notifier import SlackNotifier
 
 # ログ設定
@@ -21,6 +23,14 @@ COL_ARRIVAL_DATE = 5  # F列（中国事務所到着日）
 
 # デフォルト値
 DEFAULT_NUM_COLS = 26  # デフォルトは26列（A-Z）
+
+# リトライ設定
+MAX_RETRIES = 5  # 最大リトライ回数
+INITIAL_BACKOFF = 1  # 初期待機時間（秒）
+MAX_BACKOFF = 60  # 最大待機時間（秒）
+
+# バッチサイズ
+BATCH_SIZE = 50  # 一度に処理する行数
 
 
 class GSheet:
@@ -149,6 +159,41 @@ class GSheet:
         except Exception as e:
             logger.error(f"テーブル範囲拡張エラー: {e}")
     
+    def _execute_with_retry(self, func, *args, **kwargs):
+        """
+        指数バックオフでAPIリクエストをリトライ
+        
+        Args:
+            func: 実行する関数
+            *args: 関数の位置引数
+            **kwargs: 関数のキーワード引数
+            
+        Returns:
+            関数の実行結果
+            
+        Raises:
+            Exception: 最大リトライ回数に達した場合
+        """
+        backoff = INITIAL_BACKOFF
+        
+        for attempt in range(MAX_RETRIES):
+            try:
+                return func(*args, **kwargs)
+            except HttpError as e:
+                if e.resp.status == 429:  # Quota exceeded
+                    if attempt < MAX_RETRIES - 1:
+                        wait_time = min(backoff * (2 ** attempt), MAX_BACKOFF)
+                        logger.warning(f"APIクォータ超過。{wait_time}秒待機後にリトライします（{attempt + 1}/{MAX_RETRIES}）")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"最大リトライ回数に達しました: {e}")
+                        raise
+                else:
+                    raise
+            except Exception as e:
+                logger.error(f"予期しないエラー: {e}")
+                raise
+    
     def _should_update_row(self, row_index, existing_arrival_dates):
         """
         行を更新すべきかチェック
@@ -178,7 +223,9 @@ class GSheet:
         """
         end_col = len(row_data)
         range_name = f"A{row_index}:{chr(64 + end_col)}{row_index}"
-        self.ws.update(range_name, [row_data])
+        
+        # リトライ付きで更新実行
+        self._execute_with_retry(self.ws.update, range_name, [row_data])
         logger.info(f"注文番号 {order_id} のF列が空のため更新しました")
         
         # F列が空から値ありに変更された場合、Slack通知を送信
@@ -194,7 +241,8 @@ class GSheet:
             order_id: 注文番号
             new_arrival_date: 到着日
         """
-        self.ws.append_row(row_data)
+        # リトライ付きで追加実行
+        self._execute_with_retry(self.ws.append_row, row_data)
         logger.info(f"新しい注文番号 {order_id} を追加しました")
         
         # 新規追加時にF列に値がある場合もSlack通知を送信
@@ -220,8 +268,9 @@ class GSheet:
         existing_arrival_dates = self.ws.col_values(COL_ARRIVAL_DATE + 1)  # F列の全データ
         
         max_row = len(existing_orders)  # 現在の最大行を記録
+        processed_count = 0
         
-        for row_data in data_rows:
+        for i, row_data in enumerate(data_rows):
             order_id = row_data[COL_ORDER_ID]  # 注文番号
             new_arrival_date = row_data[COL_ARRIVAL_DATE] if len(row_data) > COL_ARRIVAL_DATE else ""
             
@@ -229,15 +278,22 @@ class GSheet:
                 # 既存の注文番号がある場合
                 row_index = existing_orders.index(order_id) + 1
                 
-                # F列（中国事務所到着日）が空の場合のみ更新
+                # F列が空の場合のみ更新
                 if self._should_update_row(row_index, existing_arrival_dates):
                     self._update_existing_order(row_index, row_data, order_id, new_arrival_date)
+                    processed_count += 1
                 else:
                     logger.info(f"注文番号 {order_id} のF列に既に値があるためスキップしました")
             else:
                 # 新しい注文の場合、追記
                 self._add_new_order(row_data, order_id, new_arrival_date)
                 max_row += 1  # 新規行が追加されたので行数を増やす
+                processed_count += 1
+            
+            # バッチサイズごとに待機してAPIクォータを回避
+            if processed_count > 0 and processed_count % BATCH_SIZE == 0:
+                logger.info(f"{processed_count}件処理完了。APIクォータ回避のため2秒待機します...")
+                time.sleep(2)
         
         # データ書き込み後、テーブル範囲を拡張
         if max_row > 0:
