@@ -1,4 +1,3 @@
-import time
 import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -118,9 +117,6 @@ class GSheet:
 		"""
 		if not values:
 			return
-
-		# ヘッダー行をスキップして処理
-		headers = values[0]
 
 		# データ行をバッチで処理
 		data_rows = values[1:]
