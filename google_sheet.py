@@ -3,6 +3,7 @@ import os
 import logging
 import time
 import gspread
+from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -26,11 +27,12 @@ DEFAULT_NUM_COLS = 26  # デフォルトは26列（A-Z）
 
 # リトライ設定
 MAX_RETRIES = 5  # 最大リトライ回数
-INITIAL_BACKOFF = 1  # 初期待機時間（秒）
-MAX_BACKOFF = 60  # 最大待機時間（秒）
+INITIAL_BACKOFF = 2  # 初期待機時間（秒）
+MAX_BACKOFF = 120  # 最大待機時間（秒）
 
 # バッチサイズ
-BATCH_SIZE = 50  # 一度に処理する行数
+BATCH_SIZE = 20  # 一度に処理する行数
+BATCH_WAIT_TIME = 5  # バッチ間の待機時間（秒）
 
 
 class GSheet:
@@ -179,8 +181,16 @@ class GSheet:
         for attempt in range(MAX_RETRIES):
             try:
                 return func(*args, **kwargs)
-            except HttpError as e:
-                if e.resp.status == 429:  # Quota exceeded
+            except (HttpError, APIError) as e:
+                # HttpErrorの場合
+                is_quota_error = False
+                if isinstance(e, HttpError):
+                    is_quota_error = e.resp.status == 429
+                # APIErrorの場合（gspread）
+                elif isinstance(e, APIError):
+                    is_quota_error = '429' in str(e) or 'Quota exceeded' in str(e)
+                
+                if is_quota_error:
                     if attempt < MAX_RETRIES - 1:
                         wait_time = min(backoff * (2 ** attempt), MAX_BACKOFF)
                         logger.warning(f"APIクォータ超過。{wait_time}秒待機後にリトライします（{attempt + 1}/{MAX_RETRIES}）")
@@ -292,8 +302,8 @@ class GSheet:
             
             # バッチサイズごとに待機してAPIクォータを回避
             if processed_count > 0 and processed_count % BATCH_SIZE == 0:
-                logger.info(f"{processed_count}件処理完了。APIクォータ回避のため2秒待機します...")
-                time.sleep(2)
+                logger.info(f"{processed_count}件処理完了。APIクォータ回避のため{BATCH_WAIT_TIME}秒待機します...")
+                time.sleep(BATCH_WAIT_TIME)
         
         # データ書き込み後、テーブル範囲を拡張
         if max_row > 0:
