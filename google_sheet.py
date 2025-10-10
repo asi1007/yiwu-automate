@@ -205,7 +205,7 @@ class GSheet:
                 logger.error(f"予期しないエラー: {e}")
                 raise
     
-    def _should_update_row(self, row_index, row_data):
+    def _should_update_row(self, row_index, row_data, all_existing_data):
         """
         行を更新すべきかチェック（現在の値と新しい値を比較）
         I列（商品画像）までを比較対象とする
@@ -213,24 +213,20 @@ class GSheet:
         Args:
             row_index: 行インデックス（1から始まる）
             row_data: 新しいデータ
+            all_existing_data: 全既存データ（キャッシュ）
             
         Returns:
             更新すべき場合True、そうでない場合False
         """
         try:
-            # I列（商品画像、インデックス9）までの範囲を取得
-            compare_end_col = min(COL_IMAGE + 1, len(row_data))
-            range_name = f"A{row_index}:{chr(64 + compare_end_col)}{row_index}"
-            existing_data = self.ws.get(range_name)
-            
-            # データが存在しない場合は更新
-            if not existing_data or not existing_data[0]:
+            # キャッシュから既存データを取得（インデックスは0始まりなので-1）
+            if row_index - 1 >= len(all_existing_data):
                 return True
             
-            existing_row = existing_data[0]
+            existing_row = all_existing_data[row_index - 1]
             
             # I列（インデックス9）までを比較
-            compare_len = min(compare_end_col, len(existing_row), len(row_data))
+            compare_len = min(COL_IMAGE + 1, len(existing_row), len(row_data))
             
             # 各セルを比較（値が異なれば更新）
             for i in range(compare_len):
@@ -317,9 +313,12 @@ class GSheet:
         data_rows = values[1:]
         logger.info(f"Google Sheetsへの書き込み開始: 全{len(data_rows)}件")
         
-        existing_orders = self.ws.col_values(COL_ORDER_ID + 1)  # B列の全データ
+        # 全既存データを一度に取得（Readリクエストを削減）
+        logger.info("既存データを取得中...")
+        all_existing_data = self._execute_with_retry(self.ws.get_all_values)
+        existing_orders = [row[COL_ORDER_ID] for row in all_existing_data if len(row) > COL_ORDER_ID]
         
-        max_row = len(existing_orders)  # 現在の最大行を記録
+        max_row = len(all_existing_data)  # 現在の最大行を記録
         processed_count = 0
         updated_count = 0
         added_count = 0
@@ -334,7 +333,7 @@ class GSheet:
                 row_index = existing_orders.index(order_id) + 1
                 
                 # 値が変わっている場合のみ更新
-                if self._should_update_row(row_index, row_data):
+                if self._should_update_row(row_index, row_data, all_existing_data):
                     self._update_existing_order(row_index, row_data, order_id, new_arrival_date)
                     processed_count += 1
                     updated_count += 1
