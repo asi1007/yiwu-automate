@@ -241,7 +241,10 @@ class GSheet:
         logger.info(f"[更新] 注文番号: {order_id}")
         logger.info(f"  ステータス: {row_data[0] if len(row_data) > 0 else ''}")
         logger.info(f"  注文日: {row_data[2] if len(row_data) > 2 else ''}")
+        logger.info(f"  見積完了日: {row_data[3] if len(row_data) > 3 else ''}")
+        logger.info(f"  買付完了日: {row_data[4] if len(row_data) > 4 else ''}")
         logger.info(f"  中国事務所到着日: {row_data[5] if len(row_data) > 5 else ''}")
+        logger.info(f"  発送可能日: {row_data[6] if len(row_data) > 6 else ''}")
         logger.info(f"  商品名: {row_data[10] if len(row_data) > 10 else ''}")
         
         # F列が空から値ありに変更された場合、Slack通知を送信
@@ -264,7 +267,10 @@ class GSheet:
         logger.info(f"[新規追加] 注文番号: {order_id}")
         logger.info(f"  ステータス: {row_data[0] if len(row_data) > 0 else ''}")
         logger.info(f"  注文日: {row_data[2] if len(row_data) > 2 else ''}")
+        logger.info(f"  見積完了日: {row_data[3] if len(row_data) > 3 else ''}")
+        logger.info(f"  買付完了日: {row_data[4] if len(row_data) > 4 else ''}")
         logger.info(f"  中国事務所到着日: {row_data[5] if len(row_data) > 5 else ''}")
+        logger.info(f"  発送可能日: {row_data[6] if len(row_data) > 6 else ''}")
         logger.info(f"  商品名: {row_data[10] if len(row_data) > 10 else ''}")
         
         # 新規追加時にF列に値がある場合もSlack通知を送信
