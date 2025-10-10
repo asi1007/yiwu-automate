@@ -21,6 +21,7 @@ SCOPES = [
 # 列のインデックス定数
 COL_ORDER_ID = 1  # B列（注文番号）
 COL_ARRIVAL_DATE = 5  # F列（中国事務所到着日）
+COL_IMAGE = 9  # J列（商品画像）- 更新チェックの最終列
 
 # デフォルト値
 DEFAULT_NUM_COLS = 26  # デフォルトは26列（A-Z）
@@ -207,6 +208,7 @@ class GSheet:
     def _should_update_row(self, row_index, row_data):
         """
         行を更新すべきかチェック（現在の値と新しい値を比較）
+        I列（商品画像）までを比較対象とする
         
         Args:
             row_index: 行インデックス（1から始まる）
@@ -216,9 +218,9 @@ class GSheet:
             更新すべき場合True、そうでない場合False
         """
         try:
-            # 現在の行のデータを取得
-            end_col = len(row_data)
-            range_name = f"A{row_index}:{chr(64 + end_col)}{row_index}"
+            # I列（商品画像、インデックス9）までの範囲を取得
+            compare_end_col = min(COL_IMAGE + 1, len(row_data))
+            range_name = f"A{row_index}:{chr(64 + compare_end_col)}{row_index}"
             existing_data = self.ws.get(range_name)
             
             # データが存在しない場合は更新
@@ -227,19 +229,15 @@ class GSheet:
             
             existing_row = existing_data[0]
             
-            # 長さを合わせる（短い方に合わせて比較）
-            min_len = min(len(existing_row), len(row_data))
+            # I列（インデックス9）までを比較
+            compare_len = min(compare_end_col, len(existing_row), len(row_data))
             
             # 各セルを比較（値が異なれば更新）
-            for i in range(min_len):
+            for i in range(compare_len):
                 existing_val = str(existing_row[i]).strip() if i < len(existing_row) else ""
                 new_val = str(row_data[i]).strip() if i < len(row_data) else ""
                 if existing_val != new_val:
                     return True
-            
-            # 長さが異なる場合も更新
-            if len(existing_row) != len(row_data):
-                return True
             
             return False
         except Exception as e:
