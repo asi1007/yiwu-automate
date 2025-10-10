@@ -118,23 +118,43 @@ class YiwuScraper:
         
         return items
     
-    async def extract_product_links_from_context(self, context, link):
-        """詳細ページから商品リンクを抽出"""
-        page = await context.new_page()
-        try:
-            await page.goto(link)
-            await page.wait_for_load_state("networkidle")
+    async def extract_product_links_from_context(self, context, link, max_retries=3):
+        """
+        詳細ページから商品リンクを抽出
+        
+        Args:
+            context: ブラウザコンテキスト
+            link: 詳細ページのURL
+            max_retries: 最大リトライ回数
             
-            # 商品情報テーブルを探す
-            tables = page.locator('table.table.table-bordered.table-striped.table-responsive')
-            table = tables.nth(0)
-            rows = table.locator('tbody > tr')
-            row = rows.nth(2)
-            cells = row.locator('td > a')
-            link = await cells.nth(0).get_attribute('href')
-            return link
-        finally:
-            await page.close()
+        Returns:
+            商品リンク（取得できない場合は空文字列）
+        """
+        page = await context.new_page()
+        
+        for attempt in range(max_retries):
+            try:
+                # タイムアウトを60秒に延長
+                await page.goto(link, timeout=60000)
+                await page.wait_for_load_state("networkidle", timeout=60000)
+                
+                # 商品情報テーブルを探す
+                tables = page.locator('table.table.table-bordered.table-striped.table-responsive')
+                table = tables.nth(0)
+                rows = table.locator('tbody > tr')
+                row = rows.nth(2)
+                cells = row.locator('td > a')
+                product_link = await cells.nth(0).get_attribute('href')
+                await page.close()
+                return product_link
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"詳細ページ {link} の読み込みに失敗。リトライします（{attempt + 1}/{max_retries}）: {e}")
+                    await asyncio.sleep(2)  # 2秒待機してリトライ
+                else:
+                    logger.warning(f"詳細ページ {link} の処理でエラー: {e}")
+                    await page.close()
+                    return ""  # リトライ上限に達したら空文字列を返す
     
     async def has_next_page(self, page, next_link):
         """次ページの存在確認"""
@@ -192,35 +212,51 @@ class YiwuScraper:
         
         return results
     
-    async def enrich_with_product_links(self, context, results):
-        """商品リンクでデータを拡張"""
-        tasks = []
+    async def enrich_with_product_links(self, context, results, batch_size=10):
+        """
+        商品リンクでデータを拡張
+        
+        Args:
+            context: ブラウザコンテキスト
+            results: スクレイピング結果のリスト
+            batch_size: 並列処理のバッチサイズ
+        """
+        # 詳細リンクのリストを作成
+        detail_links = []
         for r in results:
             detail_link = r.get("detailLink", "")
-            if detail_link:
-                task = self.extract_product_links_from_context(context, detail_link)
-                tasks.append((detail_link, task))
+            if detail_link and detail_link not in [dl for dl, _ in detail_links]:
+                detail_links.append((detail_link, r))
         
-        # 全てのタスクを並列実行
-        results_list = await asyncio.gather(*[task for _, task in tasks], return_exceptions=True)
+        logger.info(f"{len(detail_links)}件の詳細ページから商品リンクを取得します")
         
-        # 結果を各注文に追加
-        for i, (detail_link, _) in enumerate(tasks):
-            try:
-                product_link = results_list[i]
+        # バッチ処理で並列実行
+        product_links = {}
+        for i in range(0, len(detail_links), batch_size):
+            batch = detail_links[i:i + batch_size]
+            logger.info(f"バッチ {i // batch_size + 1}/{(len(detail_links) + batch_size - 1) // batch_size} を処理中...")
+            
+            # バッチ内のタスクを並列実行
+            tasks = [self.extract_product_links_from_context(context, link) for link, _ in batch]
+            results_list = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 結果を辞書に格納
+            for j, (detail_link, _) in enumerate(batch):
+                product_link = results_list[j]
                 if isinstance(product_link, Exception):
                     logger.warning(f"詳細ページ {detail_link} の処理でエラー: {product_link}")
-                    product_link = ""
-                
-                # 該当する注文にリンクを追加
-                for r in results:
-                    if r.get("detailLink") == detail_link:
-                        r["orderLink"] = product_link
-            except Exception as e:
-                logger.error(f"詳細ページ {detail_link} の処理でエラー: {e}")
-                for r in results:
-                    if r.get("detailLink") == detail_link:
-                        r["orderLink"] = ""
+                    product_links[detail_link] = ""
+                else:
+                    product_links[detail_link] = product_link if product_link else ""
+            
+            # バッチ間で待機（サーバー負荷を考慮）
+            if i + batch_size < len(detail_links):
+                await asyncio.sleep(1)
+        
+        # 結果を各注文に追加
+        for r in results:
+            detail_link = r.get("detailLink", "")
+            r["orderLink"] = product_links.get(detail_link, "")
     
     async def run(self):
         """メイン実行メソッド"""
@@ -295,7 +331,6 @@ class DataProcessor:
                 "",  # 色・サイズ等指定（現在は空）
                 current_time,  # 更新日
             ])
-        
         return values
 
 
