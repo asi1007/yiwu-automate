@@ -204,22 +204,47 @@ class GSheet:
                 logger.error(f"予期しないエラー: {e}")
                 raise
     
-    def _should_update_row(self, row_index, existing_arrival_dates):
+    def _should_update_row(self, row_index, row_data):
         """
-        行を更新すべきかチェック
+        行を更新すべきかチェック（現在の値と新しい値を比較）
         
         Args:
             row_index: 行インデックス（1から始まる）
-            existing_arrival_dates: 既存の到着日リスト
+            row_data: 新しいデータ
             
         Returns:
             更新すべき場合True、そうでない場合False
         """
-        if row_index > len(existing_arrival_dates):
+        try:
+            # 現在の行のデータを取得
+            end_col = len(row_data)
+            range_name = f"A{row_index}:{chr(64 + end_col)}{row_index}"
+            existing_data = self.ws.get(range_name)
+            
+            # データが存在しない場合は更新
+            if not existing_data or not existing_data[0]:
+                return True
+            
+            existing_row = existing_data[0]
+            
+            # 長さを合わせる（短い方に合わせて比較）
+            min_len = min(len(existing_row), len(row_data))
+            
+            # 各セルを比較（値が異なれば更新）
+            for i in range(min_len):
+                existing_val = str(existing_row[i]).strip() if i < len(existing_row) else ""
+                new_val = str(row_data[i]).strip() if i < len(row_data) else ""
+                if existing_val != new_val:
+                    return True
+            
+            # 長さが異なる場合も更新
+            if len(existing_row) != len(row_data):
+                return True
+            
+            return False
+        except Exception as e:
+            logger.warning(f"行比較エラー（更新を実行します）: {e}")
             return True
-        
-        arrival_date = existing_arrival_dates[row_index - 1] if existing_arrival_dates[row_index - 1] else ""
-        return not arrival_date.strip()
     
     def _update_existing_order(self, row_index, row_data, order_id, new_arrival_date):
         """
@@ -295,7 +320,6 @@ class GSheet:
         logger.info(f"Google Sheetsへの書き込み開始: 全{len(data_rows)}件")
         
         existing_orders = self.ws.col_values(COL_ORDER_ID + 1)  # B列の全データ
-        existing_arrival_dates = self.ws.col_values(COL_ARRIVAL_DATE + 1)  # F列の全データ
         
         max_row = len(existing_orders)  # 現在の最大行を記録
         processed_count = 0
@@ -311,13 +335,13 @@ class GSheet:
                 # 既存の注文番号がある場合
                 row_index = existing_orders.index(order_id) + 1
                 
-                # F列が空の場合のみ更新
-                if self._should_update_row(row_index, existing_arrival_dates):
+                # 値が変わっている場合のみ更新
+                if self._should_update_row(row_index, row_data):
                     self._update_existing_order(row_index, row_data, order_id, new_arrival_date)
                     processed_count += 1
                     updated_count += 1
                 else:
-                    logger.info(f"注文番号 {order_id} のF列に既に値があるためスキップしました")
+                    logger.info(f"注文番号 {order_id} は変更がないためスキップしました")
                     skipped_count += 1
             else:
                 # 新しい注文の場合、追記
