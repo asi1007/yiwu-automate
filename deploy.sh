@@ -37,57 +37,10 @@ docker build --platform linux/amd64 -t asia-northeast1-docker.pkg.dev/$PROJECT_I
 echo "Artifact Registryにプッシュ中..."
 docker push asia-northeast1-docker.pkg.dev/$PROJECT_ID/$SERVICE_NAME/$SERVICE_NAME
 
-# Cloud Run Jobを作成・更新
-echo "Cloud Run Jobを作成・更新中..."
-# 既存のジョブがあるかチェック
-if gcloud run jobs describe $SERVICE_NAME --region=$REGION >/dev/null 2>&1; then
-  echo "既存のジョブを更新中..."
-  gcloud run jobs replace /dev/stdin --region=$REGION <<EOF
-apiVersion: run.googleapis.com/v1
-kind: Job
-metadata:
-  name: $SERVICE_NAME
-  annotations:
-    run.googleapis.com/launch-stage: BETA
-spec:
-  template:
-    spec:
-      template:
-        spec:
-          containers:
-          - image: asia-northeast1-docker.pkg.dev/$PROJECT_ID/$SERVICE_NAME/$SERVICE_NAME
-            env:
-            - name: YIWU_USERNAME
-              value: "$YIWU_USERNAME"
-            - name: YIWU_PASSWORD
-              value: "$YIWU_PASSWORD"
-            - name: GOOGLE_SHEETS_CREDENTIALS_JSON
-              value: "$GOOGLE_SHEETS_CREDENTIALS_JSON"
-            - name: GOOGLE_SHEETS_SPREADSHEET_ID
-              value: "$GOOGLE_SHEETS_SPREADSHEET_ID"
-            - name: GOOGLE_SHEETS_WORKSHEET
-              value: "$GOOGLE_SHEETS_WORKSHEET"
-            resources:
-              limits:
-                cpu: 2000m
-                memory: 2Gi
-          restartPolicy: Never
-          timeoutSeconds: 3600
-EOF
-else
-  echo "新しいジョブを作成中..."
-  gcloud run jobs create $SERVICE_NAME \
-    --image asia-northeast1-docker.pkg.dev/$PROJECT_ID/$SERVICE_NAME/$SERVICE_NAME \
-    --region $REGION \
-    --set-env-vars YIWU_USERNAME=$YIWU_USERNAME \
-    --set-env-vars YIWU_PASSWORD=$YIWU_PASSWORD \
-    --set-env-vars GOOGLE_SHEETS_CREDENTIALS_JSON=$GOOGLE_SHEETS_CREDENTIALS_JSON \
-    --set-env-vars GOOGLE_SHEETS_SPREADSHEET_ID=$GOOGLE_SHEETS_SPREADSHEET_ID \
-    --set-env-vars GOOGLE_SHEETS_WORKSHEET=$GOOGLE_SHEETS_WORKSHEET \
-    --memory 2Gi \
-    --cpu 2 \
-    --task-timeout 3600 \
-    --max-retries 3
-fi
+# Cloud Run Jobを更新
+echo "Cloud Run Jobを更新中..."
+gcloud run jobs update $SERVICE_NAME \
+  --image asia-northeast1-docker.pkg.dev/$PROJECT_ID/$SERVICE_NAME/$SERVICE_NAME \
+  --region $REGION
 
 echo "デプロイ完了！"
