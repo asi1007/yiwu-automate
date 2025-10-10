@@ -18,9 +18,13 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-# 列のインデックス定数
-COL_ORDER_ID = 1  # B列（注文番号）
-COL_ARRIVAL_DATE = 5  # F列（中国事務所到着日）
+# 列のインデックス定数（0始まり）
+COL_ORDER_ID = 1  # B列（注文番号）- インデックス1
+COL_ARRIVAL_DATE = 5  # F列（中国事務所到着日）- インデックス5
+
+# col_values()用の列番号（1始まり）
+COL_ORDER_ID_NUM = 2  # B列
+COL_ARRIVAL_DATE_NUM = 6  # F列
 
 # デフォルト値
 DEFAULT_NUM_COLS = 26  # デフォルトは26列（A-Z）
@@ -294,8 +298,8 @@ class GSheet:
         data_rows = values[1:]
         logger.info(f"Google Sheetsへの書き込み開始: 全{len(data_rows)}件")
         
-        existing_orders = self.ws.col_values(COL_ORDER_ID + 1)  # B列の全データ
-        existing_arrival_dates = self.ws.col_values(COL_ARRIVAL_DATE + 1)  # F列の全データ
+        existing_orders = self.ws.col_values(COL_ORDER_ID_NUM)  # B列の全データ
+        existing_arrival_dates = self.ws.col_values(COL_ARRIVAL_DATE_NUM)  # F列の全データ
         
         max_row = len(existing_orders)  # 現在の最大行を記録
         processed_count = 0
