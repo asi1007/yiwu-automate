@@ -236,7 +236,13 @@ class GSheet:
         
         # リトライ付きで更新実行
         self._execute_with_retry(self.ws.update, range_name, [row_data])
-        logger.info(f"注文番号 {order_id} のF列が空のため更新しました")
+        
+        # 更新内容をログに出力
+        logger.info(f"[更新] 注文番号: {order_id}")
+        logger.info(f"  ステータス: {row_data[0] if len(row_data) > 0 else ''}")
+        logger.info(f"  注文日: {row_data[2] if len(row_data) > 2 else ''}")
+        logger.info(f"  中国事務所到着日: {row_data[5] if len(row_data) > 5 else ''}")
+        logger.info(f"  商品名: {row_data[10] if len(row_data) > 10 else ''}")
         
         # F列が空から値ありに変更された場合、Slack通知を送信
         if new_arrival_date and new_arrival_date.strip():
@@ -253,7 +259,13 @@ class GSheet:
         """
         # リトライ付きで追加実行
         self._execute_with_retry(self.ws.append_row, row_data)
-        logger.info(f"新しい注文番号 {order_id} を追加しました")
+        
+        # 追加内容をログに出力
+        logger.info(f"[新規追加] 注文番号: {order_id}")
+        logger.info(f"  ステータス: {row_data[0] if len(row_data) > 0 else ''}")
+        logger.info(f"  注文日: {row_data[2] if len(row_data) > 2 else ''}")
+        logger.info(f"  中国事務所到着日: {row_data[5] if len(row_data) > 5 else ''}")
+        logger.info(f"  商品名: {row_data[10] if len(row_data) > 10 else ''}")
         
         # 新規追加時にF列に値がある場合もSlack通知を送信
         if new_arrival_date and new_arrival_date.strip():
@@ -274,11 +286,16 @@ class GSheet:
         
         # データ行をバッチで処理
         data_rows = values[1:]
+        logger.info(f"Google Sheetsへの書き込み開始: 全{len(data_rows)}件")
+        
         existing_orders = self.ws.col_values(COL_ORDER_ID + 1)  # B列の全データ
         existing_arrival_dates = self.ws.col_values(COL_ARRIVAL_DATE + 1)  # F列の全データ
         
         max_row = len(existing_orders)  # 現在の最大行を記録
         processed_count = 0
+        updated_count = 0
+        added_count = 0
+        skipped_count = 0
         
         for i, row_data in enumerate(data_rows):
             order_id = row_data[COL_ORDER_ID]  # 注文番号
@@ -292,13 +309,16 @@ class GSheet:
                 if self._should_update_row(row_index, existing_arrival_dates):
                     self._update_existing_order(row_index, row_data, order_id, new_arrival_date)
                     processed_count += 1
+                    updated_count += 1
                 else:
                     logger.info(f"注文番号 {order_id} のF列に既に値があるためスキップしました")
+                    skipped_count += 1
             else:
                 # 新しい注文の場合、追記
                 self._add_new_order(row_data, order_id, new_arrival_date)
                 max_row += 1  # 新規行が追加されたので行数を増やす
                 processed_count += 1
+                added_count += 1
             
             # バッチサイズごとに待機してAPIクォータを回避
             if processed_count > 0 and processed_count % BATCH_SIZE == 0:
@@ -308,3 +328,12 @@ class GSheet:
         # データ書き込み後、テーブル範囲を拡張
         if max_row > 0:
             self.update_table_range(max_row)
+        
+        # 統計情報をログに出力
+        logger.info("=" * 50)
+        logger.info(f"Google Sheetsへの書き込み完了")
+        logger.info(f"  総データ数: {len(data_rows)}件")
+        logger.info(f"  新規追加: {added_count}件")
+        logger.info(f"  更新: {updated_count}件")
+        logger.info(f"  スキップ: {skipped_count}件")
+        logger.info("=" * 50)
