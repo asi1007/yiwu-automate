@@ -240,7 +240,7 @@ class GSheet:
             logger.warning(f"行比較エラー（更新を実行します）: {e}")
             return True
     
-    def _update_existing_order(self, row_index, row_data, order_id, new_arrival_date):
+    def _update_existing_order(self, row_index, row_data, order_id, new_arrival_date, old_arrival_date):
         """
         既存の注文を更新
         
@@ -249,6 +249,7 @@ class GSheet:
             row_data: 更新するデータ
             order_id: 注文番号
             new_arrival_date: 新しい到着日
+            old_arrival_date: 既存の到着日
         """
         end_col = len(row_data)
         range_name = f"A{row_index}:{chr(64 + end_col)}{row_index}"
@@ -266,8 +267,12 @@ class GSheet:
         logger.info(f"  発送可能日: {row_data[6] if len(row_data) > 6 else ''}")
         logger.info(f"  商品名: {row_data[10] if len(row_data) > 10 else ''}")
         
-        # F列が空から値ありに変更された場合、Slack通知を送信
-        if new_arrival_date and new_arrival_date.strip():
+        # F列（到着日）が空から値ありに変更された場合のみ、Slack通知を送信
+        old_arrival_empty = not old_arrival_date or not old_arrival_date.strip()
+        new_arrival_exists = new_arrival_date and new_arrival_date.strip()
+        
+        if old_arrival_empty and new_arrival_exists:
+            logger.info(f"  → 中国事務所到着日が更新されました。Slack通知を送信します。")
             self.slack_notifier.send_arrival_notification(order_id, new_arrival_date)
     
     def _add_new_order(self, row_data, order_id, new_arrival_date):
@@ -292,9 +297,7 @@ class GSheet:
         logger.info(f"  発送可能日: {row_data[6] if len(row_data) > 6 else ''}")
         logger.info(f"  商品名: {row_data[10] if len(row_data) > 10 else ''}")
         
-        # 新規追加時にF列に値がある場合もSlack通知を送信
-        if new_arrival_date and new_arrival_date.strip():
-            self.slack_notifier.send_arrival_notification(order_id, new_arrival_date)
+        # 新規追加時は通知しない（初回追加時に到着日がある場合は既存データのインポートの可能性が高い）
     
     def write(self, values):
         """
@@ -334,7 +337,11 @@ class GSheet:
                 
                 # 値が変わっている場合のみ更新
                 if self._should_update_row(row_index, row_data, all_existing_data):
-                    self._update_existing_order(row_index, row_data, order_id, new_arrival_date)
+                    # 既存の到着日を取得
+                    existing_row = all_existing_data[row_index - 1]
+                    old_arrival_date = existing_row[COL_ARRIVAL_DATE] if len(existing_row) > COL_ARRIVAL_DATE else ""
+                    
+                    self._update_existing_order(row_index, row_data, order_id, new_arrival_date, old_arrival_date)
                     processed_count += 1
                     updated_count += 1
                 else:
