@@ -27,6 +27,10 @@ class YiwuScraper:
         self.login_url = f"{self.base_url}/login"
         self.inquiry_url = f"{self.base_url}/inquiry"
         
+        # Headlessモードの設定（デフォルトはTrue）
+        headless_str = os.environ.get("HEADLESS", "true").lower()
+        self.headless = headless_str in ("true", "1", "yes")
+        
         if not self.username or not self.password:
             raise ValueError("YIWU_USERNAME と YIWU_PASSWORD の環境変数を設定してください")
     
@@ -120,7 +124,7 @@ class YiwuScraper:
     
     async def extract_product_links_from_context(self, context, link, max_retries=3):
         """
-        詳細ページから商品リンクを抽出
+        詳細ページから商品リンクと色・サイズ等指定を抽出（複数商品対応）
         
         Args:
             context: ブラウザコンテキスト
@@ -128,7 +132,7 @@ class YiwuScraper:
             max_retries: 最大リトライ回数
             
         Returns:
-            商品リンク（取得できない場合は空文字列）
+            List[Dict[str, str]]: 商品データのリスト [{"productLink": "...", "colorSize": "..."}, ...]
         """
         page = await context.new_page()
         
@@ -138,15 +142,59 @@ class YiwuScraper:
                 await page.goto(link, timeout=60000)
                 await page.wait_for_load_state("networkidle", timeout=60000)
                 
-                # 商品情報テーブルを探す
-                tables = page.locator('table.table.table-bordered.table-striped.table-responsive')
-                table = tables.nth(0)
-                rows = table.locator('tbody > tr')
-                row = rows.nth(2)
-                cells = row.locator('td > a')
-                product_link = await cells.nth(0).get_attribute('href')
+                # すべての商品セクション（h3見出し「商品1」「商品2」など）を取得
+                product_sections = page.locator('h3:text-matches("商品\\\\d+")')
+                section_count = await product_sections.count()
+                
+                product_data = []
+                
+                # 各商品セクションから商品リンクと色・サイズ等指定を抽出
+                for i in range(section_count):
+                    # i番目の商品セクションの次にあるテーブルを取得
+                    # 「注文情報」セクション内のすべてのテーブルを取得
+                    tables = page.locator('table.table.table-bordered.table-striped.table-responsive')
+                    
+                    # i番目のテーブルを取得（商品iに対応）
+                    if i < await tables.count():
+                        table = tables.nth(i)
+                        
+                        # テーブル内の行を走査
+                        rows = table.locator('tbody > tr')
+                        row_count = await rows.count()
+                        
+                        product_link = ""
+                        color_size = ""
+                        
+                        for row_idx in range(row_count):
+                            row = rows.nth(row_idx)
+                            cells = row.locator('td')
+                            cells_count = await cells.count()
+                            
+                            if cells_count >= 2:
+                                # 最初のセルのテキストを確認
+                                first_cell_text = (await cells.nth(0).text_content() or '').strip()
+                                
+                                # 色・サイズ等指定を取得
+                                if first_cell_text == '色・サイズ等指定':
+                                    color_size = (await cells.nth(1).text_content() or '').strip()
+                                    # 改行を空白に置換して1行にする
+                                    color_size = ' '.join(color_size.split())
+                                
+                                # URLを取得
+                                elif first_cell_text == 'URL':
+                                    link_element = await cells.nth(1).query_selector('a')
+                                    if link_element:
+                                        product_link = await link_element.get_attribute('href')
+                        
+                        # 結果に追加
+                        product_data.append({
+                            "productLink": product_link or "",
+                            "colorSize": color_size or ""
+                        })
+                
                 await page.close()
-                return product_link
+                return product_data
+                
             except Exception as e:
                 if attempt < max_retries - 1:
                     logger.warning(f"詳細ページ {link} の読み込みに失敗。リトライします（{attempt + 1}/{max_retries}）: {e}")
@@ -154,7 +202,7 @@ class YiwuScraper:
                 else:
                     logger.warning(f"詳細ページ {link} の処理でエラー: {e}")
                     await page.close()
-                    return ""  # リトライ上限に達したら空文字列を返す
+                    return []  # リトライ上限に達したら空リストを返す
     
     async def has_next_page(self, page, next_link):
         """次ページの存在確認"""
@@ -214,57 +262,78 @@ class YiwuScraper:
     
     async def enrich_with_product_links(self, context, results, batch_size=10):
         """
-        商品リンクでデータを拡張
+        商品リンクと色・サイズ等指定でデータを拡張（複数商品対応）
         
         Args:
             context: ブラウザコンテキスト
             results: スクレイピング結果のリスト
             batch_size: 並列処理のバッチサイズ
         """
-        # 詳細リンクのリストを作成
+        # 詳細リンクのリストを作成（重複を除外）
         detail_links = []
+        seen_links = set()
         for r in results:
             detail_link = r.get("detailLink", "")
-            if detail_link and detail_link not in [dl for dl, _ in detail_links]:
-                detail_links.append((detail_link, r))
+            if detail_link and detail_link not in seen_links:
+                detail_links.append(detail_link)
+                seen_links.add(detail_link)
         
-        logger.info(f"{len(detail_links)}件の詳細ページから商品リンクを取得します")
+        logger.info(f"{len(detail_links)}件の詳細ページから商品リンクと色・サイズ等指定を取得します")
         
         # バッチ処理で並列実行
-        product_links = {}
+        product_links = {}  # {detail_link: [{"productLink": "...", "colorSize": "..."}, ...]}
         for i in range(0, len(detail_links), batch_size):
             batch = detail_links[i:i + batch_size]
             logger.info(f"バッチ {i // batch_size + 1}/{(len(detail_links) + batch_size - 1) // batch_size} を処理中...")
             
             # バッチ内のタスクを並列実行
-            tasks = [self.extract_product_links_from_context(context, link) for link, _ in batch]
+            tasks = [self.extract_product_links_from_context(context, link) for link in batch]
             results_list = await asyncio.gather(*tasks, return_exceptions=True)
             
             # 結果を辞書に格納
-            for j, (detail_link, _) in enumerate(batch):
-                product_link = results_list[j]
-                if isinstance(product_link, Exception):
-                    logger.warning(f"詳細ページ {detail_link} の処理でエラー: {product_link}")
-                    product_links[detail_link] = ""
+            for j, detail_link in enumerate(batch):
+                product_data = results_list[j]
+                if isinstance(product_data, Exception):
+                    logger.warning(f"詳細ページ {detail_link} の処理でエラー: {product_data}")
+                    product_links[detail_link] = []
                 else:
-                    product_links[detail_link] = product_link if product_link else ""
+                    product_links[detail_link] = product_data if product_data else []
             
             # バッチ間で待機（サーバー負荷を考慮）
             if i + batch_size < len(detail_links):
                 await asyncio.sleep(1)
         
-        # 結果を各注文に追加
+        # 結果を各注文に追加（順序で紐付け）
+        detail_link_indices = {}  # 各detail_linkの現在のインデックスを追跡
+        
         for r in results:
             detail_link = r.get("detailLink", "")
-            r["orderLink"] = product_links.get(detail_link, "")
+            
+            # このdetail_linkで何番目のアイテムか
+            if detail_link not in detail_link_indices:
+                detail_link_indices[detail_link] = 0
+            
+            index = detail_link_indices[detail_link]
+            product_data_list = product_links.get(detail_link, [])
+            
+            # インデックスに対応する商品データを割り当て
+            if index < len(product_data_list):
+                product_data = product_data_list[index]
+                r["orderLink"] = product_data.get("productLink", "")
+                r["colorSize"] = product_data.get("colorSize", "")
+            else:
+                r["orderLink"] = ""
+                r["colorSize"] = ""
+            
+            detail_link_indices[detail_link] += 1
     
     async def run(self):
         """メイン実行メソッド"""
         try:
-            logger.info("スクレイピング開始...")
+            logger.info(f"スクレイピング開始... (Headless: {self.headless})")
             async with async_playwright() as p:
-                # Cloud Runでは headless=True が必要
-                browser = await p.chromium.launch(headless=True)
+                # Headlessモードを環境変数で制御（デフォルトはTrue）
+                browser = await p.chromium.launch(headless=self.headless)
                 context = await browser.new_context()
                 page = await context.new_page()
                 
@@ -328,7 +397,7 @@ class DataProcessor:
                 r.get("orderLink", ""),
                 r.get("imageUrl", ""),
                 r.get("itemName", ""),
-                "",  # 色・サイズ等指定（現在は空）
+                r.get("colorSize", ""),  # 色・サイズ等指定
                 current_time,  # 更新日
             ])
         return values

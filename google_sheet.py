@@ -22,6 +22,8 @@ SCOPES = [
 COL_ORDER_ID = 1  # B列（注文番号）
 COL_ARRIVAL_DATE = 5  # F列（中国事務所到着日）
 COL_IMAGE = 9  # J列（商品画像）- 更新チェックの最終列
+COL_ITEM_NAME = 10  # K列（商品名）
+COL_COLOR_SIZE = 11  # L列（色・サイズ等指定）
 
 # デフォルト値
 DEFAULT_NUM_COLS = 26  # デフォルトは26列（A-Z）
@@ -32,8 +34,8 @@ INITIAL_BACKOFF = 2  # 初期待機時間（秒）
 MAX_BACKOFF = 120  # 最大待機時間（秒）
 
 # バッチサイズ
-BATCH_SIZE = 20  # 一度に処理する行数
-BATCH_WAIT_TIME = 5  # バッチ間の待機時間（秒）
+BATCH_SIZE = 5  # 一度に処理する行数（APIクォータ制限に対応）
+BATCH_WAIT_TIME = 15  # バッチ間の待機時間（秒）
 
 
 class GSheet:
@@ -319,7 +321,17 @@ class GSheet:
         # 全既存データを一度に取得（Readリクエストを削減）
         logger.info("既存データを取得中...")
         all_existing_data = self._execute_with_retry(self.ws.get_all_values)
-        existing_orders = [row[COL_ORDER_ID] for row in all_existing_data if len(row) > COL_ORDER_ID]
+        
+        # 既存データから複合キー（注文番号+商品名+色サイズ）とその行インデックスを作成
+        existing_keys = {}  # {(order_id, item_name, color_size): row_index}
+        for idx, row in enumerate(all_existing_data):
+            if len(row) > COL_COLOR_SIZE:
+                key = (
+                    row[COL_ORDER_ID] if len(row) > COL_ORDER_ID else "",
+                    row[COL_ITEM_NAME] if len(row) > COL_ITEM_NAME else "",
+                    row[COL_COLOR_SIZE] if len(row) > COL_COLOR_SIZE else ""
+                )
+                existing_keys[key] = idx + 1  # 行番号は1から始まる
         
         max_row = len(all_existing_data)  # 現在の最大行を記録
         processed_count = 0
@@ -329,11 +341,16 @@ class GSheet:
         
         for i, row_data in enumerate(data_rows):
             order_id = row_data[COL_ORDER_ID]  # 注文番号
+            item_name = row_data[COL_ITEM_NAME] if len(row_data) > COL_ITEM_NAME else ""
+            color_size = row_data[COL_COLOR_SIZE] if len(row_data) > COL_COLOR_SIZE else ""
             new_arrival_date = row_data[COL_ARRIVAL_DATE] if len(row_data) > COL_ARRIVAL_DATE else ""
             
-            if order_id in existing_orders:
-                # 既存の注文番号がある場合
-                row_index = existing_orders.index(order_id) + 1
+            # 新しいデータの複合キーを作成
+            data_key = (order_id, item_name, color_size)
+            
+            if data_key in existing_keys:
+                # 既存の注文番号+商品名+色サイズの組み合わせがある場合
+                row_index = existing_keys[data_key]
                 
                 # 値が変わっている場合のみ更新
                 if self._should_update_row(row_index, row_data, all_existing_data):
@@ -345,10 +362,10 @@ class GSheet:
                     processed_count += 1
                     updated_count += 1
                 else:
-                    logger.info(f"注文番号 {order_id} は変更がないためスキップしました")
+                    logger.info(f"注文番号 {order_id} ({item_name} / {color_size}) は変更がないためスキップしました")
                     skipped_count += 1
             else:
-                # 新しい注文の場合、追記
+                # 新しい組み合わせの場合、追記
                 self._add_new_order(row_data, order_id, new_arrival_date)
                 max_row += 1  # 新規行が追加されたので行数を増やす
                 processed_count += 1
