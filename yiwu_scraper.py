@@ -171,21 +171,27 @@ class YiwuScraper:
                             cells = row.locator('td, th')
                             cells_count = await cells.count()
                             
-                            if cells_count >= 2:
-                                # 最初のセルのテキストを確認（thまたはtd）
-                                first_cell_text = (await cells.nth(0).text_content() or '').strip()
+                            # すべてのセルをループして、thとtdのペアを処理
+                            for cell_idx in range(cells_count - 1):
+                                cell = cells.nth(cell_idx)
+                                next_cell = cells.nth(cell_idx + 1)
                                 
-                                # 色・サイズ等指定を取得
-                                if first_cell_text == '色・サイズ等指定':
-                                    color_size = (await cells.nth(1).text_content() or '').strip()
-                                    # 改行を空白に置換して1行にする
-                                    color_size = ' '.join(color_size.split())
-                                
-                                # URLを取得
-                                elif first_cell_text == 'URL':
-                                    link_element = await cells.nth(1).query_selector('a')
-                                    if link_element:
-                                        product_link = await link_element.get_attribute('href')
+                                # 現在のセルがthかどうか確認
+                                tag_name = await cell.evaluate('el => el.tagName')
+                                if tag_name == 'TH':
+                                    cell_text = (await cell.text_content() or '').strip()
+                                    
+                                    # 色・サイズ等指定を取得
+                                    if cell_text == '色・サイズ等指定':
+                                        color_size = (await next_cell.text_content() or '').strip()
+                                        # 改行を空白に置換して1行にする
+                                        color_size = ' '.join(color_size.split())
+                                    
+                                    # URLを取得
+                                    elif cell_text == 'URL':
+                                        link_element = await next_cell.query_selector('a')
+                                        if link_element:
+                                            product_link = await link_element.get_attribute('href')
                         
                         # 結果に追加
                         product_data.append({
