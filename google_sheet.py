@@ -137,11 +137,13 @@ class GSheet:
         """
         table_id = self.get_table_id()
         if not table_id:
-            logger.info("テーブルが見つかりません。テーブル範囲の拡張をスキップします。")
+            logger.warning("テーブルが見つかりません。テーブル範囲の拡張をスキップします。")
+            logger.info("Google Sheetsでデータ範囲を手動でテーブルに変換する必要があります。")
             return
         
         try:
             num_cols = self._get_num_cols()
+            logger.info(f"テーブル範囲を拡張します: 行={last_row}, 列={num_cols}, テーブルID={table_id}")
             
             # updateTableリクエストを作成
             requests = [{
@@ -162,14 +164,15 @@ class GSheet:
             
             # batchUpdateを実行
             body = {'requests': requests}
-            self.service.spreadsheets().batchUpdate(
+            response = self.service.spreadsheets().batchUpdate(
                 spreadsheetId=self.spreadsheet_id,
                 body=body
             ).execute()
             
-            logger.info(f"テーブル範囲を{last_row}行目まで拡張しました")
+            logger.info(f"テーブル範囲を{last_row}行目まで拡張しました: {response}")
         except Exception as e:
             logger.error(f"テーブル範囲拡張エラー: {e}")
+            logger.info("代替として、Google Sheetsでテーブル範囲を手動で調整してください。")
     
     def _execute_with_retry(self, func, *args, **kwargs):
         """
