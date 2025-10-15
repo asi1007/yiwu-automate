@@ -189,9 +189,9 @@ class YiwuScraper:
                                     
                                     # URLを取得
                                     elif cell_text == 'URL':
-                                        link_element = await next_cell.query_selector('a')
-                                        if link_element:
-                                            product_link = await link_element.get_attribute('href')
+                                        link_locator = next_cell.locator('a')
+                                        if await link_locator.count() > 0:
+                                            product_link = await link_locator.get_attribute('href')
                         
                         # 結果に追加
                         product_data.append({
