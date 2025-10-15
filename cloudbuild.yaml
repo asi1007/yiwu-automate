@@ -24,3 +24,6 @@ steps:
 
 images:
   - 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/yiwu-scraper/yiwu-scraper'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
