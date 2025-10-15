@@ -167,11 +167,12 @@ class YiwuScraper:
                         
                         for row_idx in range(row_count):
                             row = rows.nth(row_idx)
-                            cells = row.locator('td')
+                            # tdとthの両方を取得
+                            cells = row.locator('td, th')
                             cells_count = await cells.count()
                             
                             if cells_count >= 2:
-                                # 最初のセルのテキストを確認
+                                # 最初のセルのテキストを確認（thまたはtd）
                                 first_cell_text = (await cells.nth(0).text_content() or '').strip()
                                 
                                 # 色・サイズ等指定を取得

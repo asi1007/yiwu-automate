@@ -17,6 +17,8 @@ steps:
       - 'yiwu-scraper'
       - '--image'
       - 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/yiwu-scraper/yiwu-scraper'
+      - '--service-account'
+      - 'yiwu-scraper@yiwu-automate.iam.gserviceaccount.com'
       - '--region'
       - 'asia-northeast1'
 

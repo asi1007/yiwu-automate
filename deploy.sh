@@ -41,6 +41,7 @@ docker push asia-northeast1-docker.pkg.dev/$PROJECT_ID/$SERVICE_NAME/$SERVICE_NA
 echo "Cloud Run Jobを更新中..."
 gcloud run jobs update $SERVICE_NAME \
   --image asia-northeast1-docker.pkg.dev/$PROJECT_ID/$SERVICE_NAME/$SERVICE_NAME \
+  --service-account yiwu-scraper@yiwu-automate.iam.gserviceaccount.com \
   --region $REGION
 
 echo "デプロイ完了！"

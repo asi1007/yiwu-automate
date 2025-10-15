@@ -5,6 +5,7 @@ import time
 import gspread
 from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
+from google.auth import default
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from slack_notifier import SlackNotifier
@@ -34,8 +35,8 @@ INITIAL_BACKOFF = 2  # 初期待機時間（秒）
 MAX_BACKOFF = 120  # 最大待機時間（秒）
 
 # バッチサイズ
-BATCH_SIZE = 5  # 一度に処理する行数（APIクォータ制限に対応）
-BATCH_WAIT_TIME = 15  # バッチ間の待機時間（秒）
+BATCH_SIZE = 3  # 一度に処理する行数（APIクォータ制限に対応）
+BATCH_WAIT_TIME = 30  # バッチ間の待機時間（秒）
 
 
 class GSheet:
@@ -65,7 +66,13 @@ class GSheet:
             raise RuntimeError("環境変数 GOOGLE_SHEETS_SPREADSHEET_ID を設定してください")
         
         # 認証情報の設定
-        creds = Credentials.from_service_account_file(self.credentials_file, scopes=SCOPES)
+        # Workload Identity（Cloud Run等）または認証情報ファイルから認証
+        if os.path.exists(self.credentials_file):
+            logger.info(f"サービスアカウントファイル {self.credentials_file} から認証します")
+            creds = Credentials.from_service_account_file(self.credentials_file, scopes=SCOPES)
+        else:
+            logger.info("Workload Identity（Application Default Credentials）で認証します")
+            creds, _ = default(scopes=SCOPES)
         
         # gspreadクライアントの初期化
         gc = gspread.authorize(creds)
