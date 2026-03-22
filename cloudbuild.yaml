@@ -1,13 +1,10 @@
 steps:
-  # Dockerイメージをビルド
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '--platform', 'linux/amd64', '-t', 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/yiwu-scraper/yiwu-scraper', '.']
-  
-  # Artifact Registryにプッシュ
+
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/yiwu-scraper/yiwu-scraper']
-  
-  # Cloud Run Jobを更新
+
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args:
@@ -21,6 +18,12 @@ steps:
       - 'yiwu-scraper@yiwu-automate.iam.gserviceaccount.com'
       - '--region'
       - 'asia-northeast1'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '2'
+      - '--task-timeout'
+      - '3600s'
 
 images:
   - 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/yiwu-scraper/yiwu-scraper'
