@@ -1,8 +1,10 @@
 import os
 import logging
 import time
+from datetime import datetime
 import gspread
 from gspread.exceptions import APIError
+from gspread.utils import rowcol_to_a1
 from google.oauth2.service_account import Credentials
 from google.auth import default
 from slack_notifier import SlackNotifier
@@ -125,3 +127,60 @@ class GSheet:
         rows = self._extract_unshipped_rows(all_data, col_map)
         logger.info(f"未発送かつ到着日未記入の行: {len(rows)}件")
         return rows
+
+    @staticmethod
+    def _match_orders(
+        unshipped_rows: list[dict], warehoused_orders: dict[str, str]
+    ) -> list[dict]:
+        matches: list[dict] = []
+        for row in unshipped_rows:
+            order_numbers = row["order_numbers"]
+            matched_dates: list[str] = []
+            all_matched = True
+            for order_num in order_numbers:
+                if order_num in warehoused_orders:
+                    matched_dates.append(warehoused_orders[order_num])
+                else:
+                    all_matched = False
+                    break
+            if not all_matched or not matched_dates:
+                continue
+            latest_dt = max(
+                datetime.strptime(d, "%Y-%m-%d %H:%M:%S") for d in matched_dates
+            )
+            arrival_date = latest_dt.strftime("%m/%d")
+            matches.append({
+                "sheet_row": row["sheet_row"],
+                "order_numbers": order_numbers,
+                "arrival_date": arrival_date,
+            })
+        return matches
+
+    def update_arrival_dates(
+        self, unshipped_rows: list[dict], warehoused_orders: dict[str, str]
+    ) -> int:
+        matches = self._match_orders(unshipped_rows, warehoused_orders)
+        if not matches:
+            logger.warning("マッチする注文がありません")
+            return 0
+
+        all_data = self._execute_with_retry(self.ws.get_all_values)
+        header = all_data[HEADER_ROW_INDEX]
+        col_map = self._find_header_columns(header)
+
+        updated_count = 0
+        for match in matches:
+            cell = rowcol_to_a1(match["sheet_row"], col_map["到着日"] + 1)
+            self._execute_with_retry(self.ws.update, cell, [[match["arrival_date"]]])
+            logger.info(
+                f"[更新] 行{match['sheet_row']}: "
+                f"注文番号={','.join(match['order_numbers'])}, "
+                f"到着日={match['arrival_date']}"
+            )
+            self.slack_notifier.send_arrival_notification(
+                ",".join(match["order_numbers"]), match["arrival_date"]
+            )
+            updated_count += 1
+
+        logger.info(f"到着日更新完了: {updated_count}件")
+        return updated_count

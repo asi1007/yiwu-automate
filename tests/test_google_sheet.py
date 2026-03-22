@@ -61,3 +61,56 @@ class TestExtractUnshippedRows:
         rows = GSheet._extract_unshipped_rows(SAMPLE_DATA, col_map)
         multi_row = [r for r in rows if len(r["order_numbers"]) > 1][0]
         assert multi_row["order_numbers"] == ["P260314001YP806", "P260314002YP806"]
+
+
+class TestMatchOrders:
+    def test_single_order_match(self):
+        from google_sheet import GSheet
+        unshipped = [
+            {"row_index": 5, "order_numbers": ["P260318001YP806"], "sheet_row": 6},
+        ]
+        warehoused = {"P260318001YP806": "2026-03-20 14:53:44"}
+        matches = GSheet._match_orders(unshipped, warehoused)
+        assert len(matches) == 1
+        assert matches[0]["sheet_row"] == 6
+        assert matches[0]["arrival_date"] == "03/20"
+
+    def test_multi_order_all_matched(self):
+        from google_sheet import GSheet
+        unshipped = [
+            {"row_index": 9, "order_numbers": ["P260314001YP806", "P260314002YP806"], "sheet_row": 10},
+        ]
+        warehoused = {
+            "P260314001YP806": "2026-03-18 10:00:00",
+            "P260314002YP806": "2026-03-20 15:00:00",
+        }
+        matches = GSheet._match_orders(unshipped, warehoused)
+        assert len(matches) == 1
+        assert matches[0]["arrival_date"] == "03/20"
+
+    def test_multi_order_partial_match_skipped(self):
+        from google_sheet import GSheet
+        unshipped = [
+            {"row_index": 9, "order_numbers": ["P260314001YP806", "P260314002YP806"], "sheet_row": 10},
+        ]
+        warehoused = {"P260314001YP806": "2026-03-18 10:00:00"}
+        matches = GSheet._match_orders(unshipped, warehoused)
+        assert len(matches) == 0
+
+    def test_no_match(self):
+        from google_sheet import GSheet
+        unshipped = [
+            {"row_index": 5, "order_numbers": ["P260399999YP806"], "sheet_row": 6},
+        ]
+        warehoused = {"P260318001YP806": "2026-03-20 14:53:44"}
+        matches = GSheet._match_orders(unshipped, warehoused)
+        assert len(matches) == 0
+
+    def test_date_format_mm_dd(self):
+        from google_sheet import GSheet
+        unshipped = [
+            {"row_index": 5, "order_numbers": ["P260101001YP806"], "sheet_row": 6},
+        ]
+        warehoused = {"P260101001YP806": "2026-01-05 09:30:00"}
+        matches = GSheet._match_orders(unshipped, warehoused)
+        assert matches[0]["arrival_date"] == "01/05"
