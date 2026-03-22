@@ -34,18 +34,20 @@ Google Sheets「仕入管理」シートの未発送行に対して、yp.buyer-c
 - メールアドレス: `input[placeholder="アカウントをご入力してください"]`
 - パスワード: `input[placeholder="パスワードをご入力してください"]`
 - ログインボタン: `button:has-text("ログイン")`
-- ログイン後 `expect_navigation` でページ遷移を待つ
+- SPA のため `expect_navigation` は使わず、`wait_for_url("**/home")` でログイン完了を待つ
+- ログイン失敗の検出: 一定時間（10秒）以内にURL変化がなければエラーメッセージの有無を確認して失敗と判定
 
 #### 入庫済みデータ取得
 
-- `https://yp.buyer-central.com/order/list?status=6&keys=order-list` に遷移
-- 入庫済みタブ（`.q-tab__label:has-text("入庫済み")`）をクリック
+- `https://yp.buyer-central.com/order/list?status=6&keys=order-list` に遷移（URLパラメータで入庫済みタブが選択される）
+- データ読み込み完了を `tr.relative` の出現で待機
 - 各注文ブロック（`tr.relative`）から以下を抽出:
   - 注文番号: `.hover-copy-box span:first-child`
   - 入庫日時: 日時列内の「入庫：」ラベルの後のテキスト
 - ページネーション: 全ページを順にスクレイピング
   - `keyboard_arrow_right` ボタンで次ページに遷移
-  - ボタンが無効（disabled）になるまでループ
+  - クリック後 `tr.relative` の再出現で読み込み完了を待機
+  - 次ページボタンが無効（disabled）になるか、最終ページに達したらループ終了
 
 #### 出力
 
@@ -79,8 +81,10 @@ Google Sheets「仕入管理」シートの未発送行に対して、yp.buyer-c
 
 #### 書き込み
 
-- マッチした行の到着日列にMM/DD形式で書き込み
-- 複数注文番号の場合、そのうち1つでもマッチすれば到着日を書き込み
+- マッチした行の到着日列にMM/DD形式で書き込み（入庫日時の月日部分を使用）
+- 複数注文番号の場合、全ての注文番号がマッチした場合のみ到着日を書き込み
+  - 到着日が複数ある場合は最も遅い日付を採用（全商品が揃った日）
+  - 一部のみマッチの場合は書き込まずスキップ（未入庫品がある）
 - 更新した行についてSlack通知を送信
 
 #### 残す部分
@@ -149,7 +153,7 @@ HEADLESS=true
 
 ## エラーハンドリング
 
-- ログイン失敗: エラーログ出力して終了
+- ログイン失敗（10秒以内にURL変化なし）: エラーログ出力して終了
 - ページスクレイピングのタイムアウト: リトライ（最大3回）
 - Google Sheets API クォータ超過: `_execute_with_retry` で指数バックオフ
 - マッチング結果0件: 警告ログのみ（正常終了）
@@ -162,5 +166,28 @@ HEADLESS=true
 ## Slack通知
 
 - 到着日が更新された行ごとに通知
-- 既存の `send_arrival_notification` を再利用
+- 既存の `send_arrival_notification` を再利用（メッセージ文言を「中国事務所到着通知」から「入庫完了通知」に変更）
 - 注文番号と到着日を含むメッセージ
+
+## main() フロー
+
+```python
+async def main():
+    # 1. Google Sheets から未発送かつ到着日未記入の行を取得
+    sheet = GSheet()
+    unshipped_rows = sheet.get_unshipped_rows()
+
+    # 2. buyer-central.com から入庫済みデータを取得
+    scraper = BuyerCentralScraper()
+    warehoused_orders = await scraper.run()
+
+    # 3. マッチング＆書き込み
+    sheet.update_arrival_dates(unshipped_rows, warehoused_orders)
+```
+
+- マッチングロジックは `GSheet.update_arrival_dates` に実装
+- スクレイパーはデータ取得のみを責務とする
+
+## DDD原則との乖離について
+
+CLAUDE.mdではDDD構造を推奨しているが、今回はサイト移行に伴う既存コードの書き換えであるため、既存ファイル構成をそのまま維持する。将来的なリファクタリングでDDD構造への移行を検討する。
