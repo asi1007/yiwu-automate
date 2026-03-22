@@ -394,6 +394,8 @@ Expected: PASS (5 tests)
 - [ ] **Step 5: `update_arrival_dates` メソッドを実装**
 
 ```python
+from gspread.utils import rowcol_to_a1
+
 def update_arrival_dates(
     self, unshipped_rows: list[dict], warehoused_orders: dict[str, str]
 ) -> int:
@@ -405,11 +407,10 @@ def update_arrival_dates(
     all_data = self._execute_with_retry(self.ws.get_all_values)
     header = all_data[HEADER_ROW_INDEX]
     col_map = self._find_header_columns(header)
-    arrival_col_letter = chr(65 + col_map["到着日"])  # A=0, B=1, ...
 
     updated_count = 0
     for match in matches:
-        cell = f"{arrival_col_letter}{match['sheet_row']}"
+        cell = rowcol_to_a1(match["sheet_row"], col_map["到着日"] + 1)
         self._execute_with_retry(self.ws.update, cell, [[match["arrival_date"]]])
         logger.info(
             f"[更新] 行{match['sheet_row']}: "
@@ -423,15 +424,6 @@ def update_arrival_dates(
 
     logger.info(f"到着日更新完了: {updated_count}件")
     return updated_count
-```
-
-注: `update_arrival_dates` 内の列文字変換には `gspread.utils.rowcol_to_a1` を使用して Z 列超えにも対応する。
-
-```python
-from gspread.utils import rowcol_to_a1
-
-# arrival_col_letter の算出部分:
-cell = rowcol_to_a1(match["sheet_row"], col_map["到着日"] + 1)  # 1-indexed
 ```
 
 - [ ] **Step 6: コミット**
