@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class BuyerCentralScraper:
     BASE_URL = "https://yp.buyer-central.com"
     LOGIN_URL = f"{BASE_URL}/login"
-    ORDER_LIST_URL = f"{BASE_URL}/order/list?status=6&keys=order-list"
+    ORDER_LIST_URL = f"{BASE_URL}/order/list?keys=order-list"
 
     def __init__(self):
         self.email = os.environ.get("BUYER_CENTRAL_EMAIL")
@@ -70,8 +70,15 @@ class BuyerCentralScraper:
         match = re.search(r"入庫：(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", date_text)
         return match.group(1) if match else ""
 
-    async def scrape_page_orders(self, page) -> dict[str, str]:
-        orders: dict[str, str] = {}
+    @staticmethod
+    async def _extract_product_name(block) -> str:
+        td0 = block.locator("td.data-td").first
+        td0_text = (await td0.text_content() or "").strip()
+        match = re.search(r"任意名(.+?)\d+\.?\d*\s*元", td0_text)
+        return match.group(1).strip() if match else ""
+
+    async def scrape_page_orders(self, page) -> dict[str, dict[str, str]]:
+        orders: dict[str, dict[str, str]] = {}
         blocks = page.locator("tr.relative")
         count = await blocks.count()
         for i in range(count):
@@ -84,16 +91,20 @@ class BuyerCentralScraper:
                 continue
             tds = block.locator("td.data-td")
             td_count = await tds.count()
-            if td_count < 4:
+            if td_count < 5:
                 continue
-            date_td = tds.nth(3)
+            date_td = tds.nth(4)
             date_text = (await date_td.text_content() or "").strip()
             warehouse_date = self._parse_warehouse_date(date_text)
             if warehouse_date:
-                orders[order_num] = warehouse_date
+                product_name = await self._extract_product_name(block)
+                orders[order_num] = {
+                    "date": warehouse_date,
+                    "product_name": product_name,
+                }
         return orders
 
-    async def _scrape_page_with_retry(self, page, max_retries: int = 3) -> dict[str, str]:
+    async def _scrape_page_with_retry(self, page, max_retries: int = 3) -> dict[str, dict[str, str]]:
         for attempt in range(max_retries):
             try:
                 await page.wait_for_selector("tr.relative", timeout=15000)
@@ -106,8 +117,8 @@ class BuyerCentralScraper:
                     logger.error(f"ページスクレイピング失敗。最大リトライ回数に到達: {e}")
                     raise
 
-    async def scrape_all_pages(self, page) -> dict[str, str]:
-        all_orders: dict[str, str] = {}
+    async def scrape_all_pages(self, page) -> dict[str, dict[str, str]]:
+        all_orders: dict[str, dict[str, str]] = {}
         page_num = 1
         while True:
             logger.info(f"ページ {page_num} をスクレイピング中...")
@@ -135,7 +146,7 @@ class BuyerCentralScraper:
         logger.info(f"全ページスクレイピング完了: 合計 {len(all_orders)}件")
         return all_orders
 
-    async def run(self) -> dict[str, str]:
+    async def run(self) -> dict[str, dict[str, str]]:
         logger.info(f"スクレイピング開始... (Headless: {self.headless})")
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=self.headless)
@@ -143,6 +154,10 @@ class BuyerCentralScraper:
             page = await context.new_page()
             await self.login(page)
             await page.goto(self.ORDER_LIST_URL)
+            await page.wait_for_load_state("networkidle")
+            await asyncio.sleep(3)
+            warehoused_tab = page.locator("text=/^入庫済み\\(\\d+\\)$/").first
+            await warehoused_tab.click()
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
             orders = await self.scrape_all_pages(page)
@@ -168,7 +183,20 @@ async def main():
         return
 
     logger.info(f"未発送行: {len(unshipped_rows)}件, 入庫済み注文: {len(warehoused_orders)}件")
-    updated = sheet.update_arrival_dates(unshipped_rows, warehoused_orders)
+
+    sheet_order_numbers = sheet.get_all_order_numbers()
+    not_in_sheet = sorted(set(warehoused_orders.keys()) - sheet_order_numbers)
+    if not_in_sheet:
+        logger.info(f"シートに存在しない入庫済み注文: {len(not_in_sheet)}件")
+        for order_num in not_in_sheet:
+            info = warehoused_orders[order_num]
+            logger.info(
+                f"  [シート未登録] {order_num} "
+                f"(入庫日: {info['date']}, 商品名: {info['product_name']})"
+            )
+
+    order_dates = {k: v["date"] for k, v in warehoused_orders.items()}
+    updated = sheet.update_arrival_dates(unshipped_rows, order_dates)
     logger.info(f"=== 到着日自動更新 完了 ({updated}件更新) ===")
 
 

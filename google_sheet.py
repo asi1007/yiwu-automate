@@ -21,7 +21,7 @@ INITIAL_BACKOFF = 2
 MAX_BACKOFF = 120
 
 HEADER_ROW_INDEX = 3
-HEADER_NAMES = ["ステータス", "注文番号", "到着日"]
+HEADER_NAMES = ["状態", "注文番号", "到着日"]
 
 
 class GSheet:
@@ -92,7 +92,7 @@ class GSheet:
     def _extract_unshipped_rows(
         all_data: list[list[str]], col_map: dict[str, int]
     ) -> list[dict]:
-        status_col = col_map["ステータス"]
+        status_col = col_map["状態"]
         order_col = col_map["注文番号"]
         arrival_col = col_map["到着日"]
         rows: list[dict] = []
@@ -118,15 +118,37 @@ class GSheet:
         return rows
 
     def get_unshipped_rows(self) -> list[dict]:
-        all_data = self._execute_with_retry(self.ws.get_all_values)
-        if len(all_data) <= HEADER_ROW_INDEX:
+        self._all_data = self._execute_with_retry(self.ws.get_all_values)
+        if len(self._all_data) <= HEADER_ROW_INDEX:
             logger.warning("ヘッダー行が見つかりません")
             return []
-        header = all_data[HEADER_ROW_INDEX]
-        col_map = self._find_header_columns(header)
-        rows = self._extract_unshipped_rows(all_data, col_map)
+        header = self._all_data[HEADER_ROW_INDEX]
+        self._col_map = self._find_header_columns(header)
+        rows = self._extract_unshipped_rows(self._all_data, self._col_map)
         logger.info(f"未発送かつ到着日未記入の行: {len(rows)}件")
         return rows
+
+    def get_all_order_numbers(self) -> set[str]:
+        all_data = getattr(self, "_all_data", None)
+        col_map = getattr(self, "_col_map", None)
+        if all_data is None or col_map is None:
+            all_data = self._execute_with_retry(self.ws.get_all_values)
+            header = all_data[HEADER_ROW_INDEX]
+            col_map = self._find_header_columns(header)
+        order_col = col_map["注文番号"]
+        order_numbers: set[str] = set()
+        for i in range(HEADER_ROW_INDEX + 1, len(all_data)):
+            row = all_data[i]
+            if len(row) <= order_col:
+                continue
+            order_raw = row[order_col].strip()
+            if not order_raw:
+                continue
+            for o in order_raw.split("\n"):
+                o = o.strip()
+                if o:
+                    order_numbers.add(o)
+        return order_numbers
 
     @staticmethod
     def _match_orders(
