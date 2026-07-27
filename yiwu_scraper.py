@@ -3,6 +3,7 @@ import json
 import re
 import logging
 import sys
+from datetime import datetime
 from playwright.async_api import async_playwright
 import os
 from dotenv import load_dotenv
@@ -91,13 +92,20 @@ class BuyerCentralScraper:
                 continue
             row_text = (await block.text_content() or "").strip()
             warehouse_date = self._parse_warehouse_date(row_text)
-            if warehouse_date:
-                product_name = await self._extract_product_name(block)
-                orders[order_num] = {
-                    "date": warehouse_date,
-                    "product_name": product_name,
-                }
+            product_name = await self._extract_product_name(block)
+            orders[order_num] = {
+                "date": warehouse_date,
+                "product_name": product_name,
+            }
         return orders
+
+    @staticmethod
+    def _fill_missing_dates(
+        orders: dict[str, dict[str, str]], today: str
+    ) -> None:
+        for info in orders.values():
+            if not info["date"]:
+                info["date"] = today
 
     async def _scrape_page_with_retry(self, page, max_retries: int = 3) -> dict[str, dict[str, str]]:
         for attempt in range(max_retries):
@@ -141,6 +149,21 @@ class BuyerCentralScraper:
         logger.info(f"全ページスクレイピング完了: 合計 {len(all_orders)}件")
         return all_orders
 
+    RECEIVED_TAB_PATTERNS = [
+        r"^(受取済み|入庫済み)\(\d+\)$",
+        r"^受領中\(\d+\)$",
+    ]
+
+    async def _scrape_tab(self, page, tab_pattern: str) -> dict[str, dict[str, str]]:
+        tab = page.locator(f"text=/{tab_pattern}/").first
+        if await tab.count() == 0:
+            logger.info(f"タブが見つかりません（スキップ）: {tab_pattern}")
+            return {}
+        await tab.click()
+        await page.wait_for_load_state("networkidle")
+        await asyncio.sleep(3)
+        return await self.scrape_all_pages(page)
+
     async def run(self) -> dict[str, dict[str, str]]:
         logger.info(f"スクレイピング開始... (Headless: {self.headless})")
         async with async_playwright() as p:
@@ -151,12 +174,12 @@ class BuyerCentralScraper:
             await page.goto(self.ORDER_LIST_URL)
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
-            warehoused_tab = page.locator("text=/^(受取済み|入庫済み)\\(\\d+\\)$/").first
-            await warehoused_tab.click()
-            await page.wait_for_load_state("networkidle")
-            await asyncio.sleep(3)
-            orders = await self.scrape_all_pages(page)
+            orders: dict[str, dict[str, str]] = {}
+            for tab_pattern in self.RECEIVED_TAB_PATTERNS:
+                orders.update(await self._scrape_tab(page, tab_pattern))
             await browser.close()
+        today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._fill_missing_dates(orders, today)
         return orders
 
 

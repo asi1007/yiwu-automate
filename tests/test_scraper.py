@@ -18,3 +18,22 @@ class TestParseWarehouseDate:
         from yiwu_scraper import BuyerCentralScraper
         result = BuyerCentralScraper._parse_warehouse_date("")
         assert result == ""
+
+
+class TestFillMissingDates:
+    def test_fills_empty_date_with_today(self):
+        from yiwu_scraper import BuyerCentralScraper
+        orders = {
+            "A001": {"date": "2026-03-20 14:53:44", "product_name": "x"},
+            "A002": {"date": "", "product_name": "y"},
+        }
+        today = "2026-07-27 00:00:00"
+        BuyerCentralScraper._fill_missing_dates(orders, today)
+        assert orders["A001"]["date"] == "2026-03-20 14:53:44"
+        assert orders["A002"]["date"] == today
+
+    def test_leaves_all_present_dates_untouched(self):
+        from yiwu_scraper import BuyerCentralScraper
+        orders = {"A001": {"date": "2026-03-20 14:53:44", "product_name": "x"}}
+        BuyerCentralScraper._fill_missing_dates(orders, "2026-07-27 00:00:00")
+        assert orders["A001"]["date"] == "2026-03-20 14:53:44"
