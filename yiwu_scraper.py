@@ -74,8 +74,8 @@ class BuyerCentralScraper:
     async def _extract_product_name(block) -> str:
         td0 = block.locator("td.data-td").first
         td0_text = (await td0.text_content() or "").strip()
-        match = re.search(r"任意名(.+?)\d+\.?\d*\s*元", td0_text)
-        return match.group(1).strip() if match else ""
+        name = re.split(r"任意名", td0_text)[0].strip()
+        return name
 
     async def scrape_page_orders(self, page) -> dict[str, dict[str, str]]:
         orders: dict[str, dict[str, str]] = {}
@@ -89,13 +89,8 @@ class BuyerCentralScraper:
             order_num = (await order_num_el.first.text_content() or "").strip()
             if not order_num:
                 continue
-            tds = block.locator("td.data-td")
-            td_count = await tds.count()
-            if td_count < 5:
-                continue
-            date_td = tds.nth(4)
-            date_text = (await date_td.text_content() or "").strip()
-            warehouse_date = self._parse_warehouse_date(date_text)
+            row_text = (await block.text_content() or "").strip()
+            warehouse_date = self._parse_warehouse_date(row_text)
             if warehouse_date:
                 product_name = await self._extract_product_name(block)
                 orders[order_num] = {
@@ -156,7 +151,7 @@ class BuyerCentralScraper:
             await page.goto(self.ORDER_LIST_URL)
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
-            warehoused_tab = page.locator("text=/^入庫済み\\(\\d+\\)$/").first
+            warehoused_tab = page.locator("text=/^(受取済み|入庫済み)\\(\\d+\\)$/").first
             await warehoused_tab.click()
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
