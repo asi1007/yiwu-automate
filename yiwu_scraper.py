@@ -8,6 +8,7 @@ from playwright.async_api import async_playwright
 import os
 from dotenv import load_dotenv
 import google_sheet
+import write_daily_note
 
 load_dotenv()
 
@@ -183,11 +184,40 @@ class BuyerCentralScraper:
         return orders
 
 
+def _format_overdue_line(order: dict) -> str:
+    return (
+        f"- {order['order_number']} {order['product_name'][:40]} "
+        f"購入 {order['purchase_date']}"
+        f"（{order['days_elapsed']}日経過・未到着）"
+    )
+
+
+def _report_overdue_orders(sheet: google_sheet.GSheet) -> None:
+    today = datetime.now().date()
+    overdue = sheet.get_overdue_orders(today)
+    if not overdue:
+        return
+    lines = [_format_overdue_line(order) for order in overdue]
+    for line in lines:
+        logger.warning(f"[到着遅延] {line}")
+    try:
+        path = write_daily_note.append_under_section(
+            "## Claude Code ログ",
+            f"到着遅延アラート ({len(overdue)}件)",
+            lines,
+            datetime.now(),
+        )
+        logger.info(f"到着遅延アラートを daily note に追記しました: {path}")
+    except Exception as e:
+        logger.error(f"daily note への追記に失敗しました: {e}")
+
+
 async def main():
     logger.info("=== 到着日自動更新 開始 ===")
 
     sheet = google_sheet.GSheet()
     unshipped_rows = sheet.get_unshipped_rows()
+    _report_overdue_orders(sheet)
     if not unshipped_rows:
         logger.info("更新対象の行がありません")
         logger.info("=== 到着日自動更新 完了 ===")

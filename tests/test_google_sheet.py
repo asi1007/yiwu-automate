@@ -1,4 +1,62 @@
 import pytest
+from datetime import date
+
+
+class TestCompleteYear:
+    def test_uses_current_year_for_past_date(self):
+        from google_sheet import GSheet
+        assert GSheet._complete_year("02-26", date(2026, 7, 28)) == date(2026, 2, 26)
+
+    def test_rolls_back_to_previous_year_for_future_date(self):
+        from google_sheet import GSheet
+        assert GSheet._complete_year("12-30", date(2026, 7, 28)) == date(2025, 12, 30)
+
+    def test_accepts_slash_separator(self):
+        from google_sheet import GSheet
+        assert GSheet._complete_year("03/18", date(2026, 7, 28)) == date(2026, 3, 18)
+
+    def test_returns_none_for_invalid(self):
+        from google_sheet import GSheet
+        assert GSheet._complete_year("", date(2026, 7, 28)) is None
+        assert GSheet._complete_year("abc", date(2026, 7, 28)) is None
+
+
+OVERDUE_HEADER = ["商品名", "購入日", "到着日", "状態", "注文番号"]
+OVERDUE_COLS = {"商品名": 0, "購入日": 1, "到着日": 2, "状態": 3, "注文番号": 4}
+OVERDUE_DATA = [
+    [], [], [],
+    OVERDUE_HEADER,
+    ["商品A", "02-26", "", "未発送", "Y0806-001"],        # 152日 → 遅延
+    ["商品A", "02-26", "", "未発送", "Y0806-001"],        # 同一注文の重複行 → 集約
+    ["商品B", "07-20", "", "未発送", "Y0806-002"],        # 8日 → 対象外
+    ["商品C", "07-01", "07/05", "未発送", "Y0806-003"],   # 到着日あり → 対象外
+    ["商品D", "01-10", "", "発送済み", "Y0806-004"],       # 未発送でない → 対象外
+    ["商品E", "07-10", "", "未発送", "Y0806-005"],        # 18日 → 遅延
+]
+
+
+class TestExtractOverdueOrders:
+    def test_extracts_overdue_and_aggregates(self):
+        from google_sheet import GSheet
+        today = date(2026, 7, 28)
+        result = GSheet._extract_overdue_orders(OVERDUE_DATA, OVERDUE_COLS, today, 14)
+        orders = {r["order_number"] for r in result}
+        assert orders == {"Y0806-001", "Y0806-005"}
+
+    def test_reports_days_elapsed(self):
+        from google_sheet import GSheet
+        today = date(2026, 7, 28)
+        result = GSheet._extract_overdue_orders(OVERDUE_DATA, OVERDUE_COLS, today, 14)
+        by_order = {r["order_number"]: r for r in result}
+        assert by_order["Y0806-005"]["days_elapsed"] == 18
+        assert by_order["Y0806-001"]["product_name"] == "商品A"
+        assert by_order["Y0806-001"]["purchase_date"] == "02-26"
+
+    def test_deduplicates_by_order_number(self):
+        from google_sheet import GSheet
+        today = date(2026, 7, 28)
+        result = GSheet._extract_overdue_orders(OVERDUE_DATA, OVERDUE_COLS, today, 14)
+        assert sum(1 for r in result if r["order_number"] == "Y0806-001") == 1
 
 
 SAMPLE_HEADER = [

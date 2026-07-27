@@ -1,7 +1,8 @@
 import os
+import re
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, date
 import gspread
 from gspread.exceptions import APIError
 from gspread.utils import rowcol_to_a1
@@ -22,6 +23,8 @@ MAX_BACKOFF = 120
 
 HEADER_ROW_INDEX = 3
 HEADER_NAMES = ["状態", "注文番号", "到着日"]
+OVERDUE_COL_NAMES = ["商品名", "購入日", "到着日", "状態", "注文番号"]
+OVERDUE_THRESHOLD_DAYS = 14
 
 
 class GSheet:
@@ -116,6 +119,86 @@ class GSheet:
                 "sheet_row": i + 1,
             })
         return rows
+
+    @staticmethod
+    def _complete_year(mmdd: str, today: date) -> date | None:
+        match = re.match(r"^\s*(\d{1,2})[-/](\d{1,2})\s*$", mmdd)
+        if not match:
+            return None
+        month, day = int(match.group(1)), int(match.group(2))
+        try:
+            purchased = date(today.year, month, day)
+        except ValueError:
+            return None
+        if purchased > today:
+            purchased = date(today.year - 1, month, day)
+        return purchased
+
+    @staticmethod
+    def _extract_overdue_orders(
+        all_data: list[list[str]],
+        cols: dict[str, int],
+        today: date,
+        threshold_days: int,
+    ) -> list[dict]:
+        status_col = cols["状態"]
+        arrival_col = cols["到着日"]
+        order_col = cols["注文番号"]
+        purchase_col = cols["購入日"]
+        name_col = cols["商品名"]
+        max_col = max(status_col, arrival_col, order_col, purchase_col, name_col)
+        seen: set[str] = set()
+        overdue: list[dict] = []
+        for i in range(HEADER_ROW_INDEX + 1, len(all_data)):
+            row = all_data[i]
+            if len(row) <= max_col:
+                continue
+            if row[status_col].strip() != "未発送":
+                continue
+            arrival = row[arrival_col].strip()
+            if arrival and arrival != "#N/A":
+                continue
+            order_raw = row[order_col].strip()
+            if not order_raw:
+                continue
+            purchased = GSheet._complete_year(row[purchase_col], today)
+            if purchased is None:
+                continue
+            days_elapsed = (today - purchased).days
+            if days_elapsed <= threshold_days:
+                continue
+            order_number = order_raw.split("\n")[0].strip()
+            if order_number in seen:
+                continue
+            seen.add(order_number)
+            overdue.append({
+                "order_number": order_number,
+                "product_name": row[name_col].strip(),
+                "purchase_date": row[purchase_col].strip(),
+                "days_elapsed": days_elapsed,
+            })
+        return overdue
+
+    def get_overdue_orders(
+        self, today: date, threshold_days: int = OVERDUE_THRESHOLD_DAYS
+    ) -> list[dict]:
+        all_data = getattr(self, "_all_data", None)
+        if all_data is None:
+            all_data = self._execute_with_retry(self.ws.get_all_values)
+        header = all_data[HEADER_ROW_INDEX]
+        cols = {}
+        for name in OVERDUE_COL_NAMES:
+            for idx, cell in enumerate(header):
+                if cell.strip() == name:
+                    cols[name] = idx
+                    break
+        missing = [n for n in OVERDUE_COL_NAMES if n not in cols]
+        if missing:
+            raise ValueError(f"ヘッダーに必要な列が見つかりません: {missing}")
+        overdue = self._extract_overdue_orders(all_data, cols, today, threshold_days)
+        overdue.sort(key=lambda o: o["days_elapsed"], reverse=True)
+        logger.info(f"発注から{threshold_days}日超の未到着: {len(overdue)}件")
+        return overdue
 
     def get_unshipped_rows(self) -> list[dict]:
         self._all_data = self._execute_with_retry(self.ws.get_all_values)
