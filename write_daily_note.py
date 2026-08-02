@@ -20,9 +20,7 @@ def _insert_under_section(
         (i for i, line in enumerate(lines) if line.strip() == section_title), None
     )
     if section_idx is None:
-        if lines and lines[-1].strip() != "":
-            lines.append("")
-        lines.extend([section_title, ""])
+        lines.append(section_title)
         lines.extend(entry)
         return lines
 
@@ -31,7 +29,7 @@ def _insert_under_section(
         if lines[i].startswith("## "):
             section_end = i
             break
-    lines[section_end:section_end] = ["", *entry, ""]
+    lines[section_end:section_end] = list(entry)
     return lines
 
 
@@ -44,11 +42,12 @@ def append_under_section(
 ) -> Path:
     path = daily_note_path(daily_dir, now)
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    doc_lines = existing.splitlines() or [f"# {now:%Y-%m-%d}", ""]
+    doc_lines = existing.splitlines() or [f"# {now:%Y-%m-%d}"]
     entry = [f"### {now:%H:%M} - {entry_title}", *lines]
     updated = _insert_under_section(doc_lines, section_title, entry)
+    updated = [line for line in updated if line.strip() != ""]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(updated).rstrip("\n") + "\n", encoding="utf-8")
+    path.write_text("\n".join(updated) + "\n", encoding="utf-8")
     return path
 
 

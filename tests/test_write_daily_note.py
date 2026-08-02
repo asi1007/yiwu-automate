@@ -50,6 +50,20 @@ class TestAppendUnderSection:
         # 既存エントリが新エントリより前にある
         assert text.index("08:00") < text.index("09:05")
 
+    def test_output_has_no_blank_lines(self, tmp_path: Path):
+        from write_daily_note import append_under_section
+
+        p = tmp_path / "2026-07-28.md"
+        p.write_text(
+            "# 2026-07-28\n\n## Claude Code ログ\n\n### 08:00 - 既存\n- a\n\n",
+            encoding="utf-8",
+        )
+        path = append_under_section(SECTION, "アラート", ["- b"], NOW, tmp_path)
+        lines = path.read_text(encoding="utf-8").split("\n")
+        # 末尾の改行由来の空要素を除き、空白行が1つも無い
+        assert [l for l in lines if l.strip() == "" and l != ""] == []
+        assert "" not in [l for l in lines[:-1]]
+
     def test_inserts_within_section_before_following_section(self, tmp_path: Path):
         from write_daily_note import append_under_section
 
