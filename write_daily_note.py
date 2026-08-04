@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 DEFAULT_DAILY_DIR = Path(
-    os.path.expanduser("~/Documents/automation/obsidian/daily")
+    os.path.expanduser("~/Documents/automation/obsidian/main/daily")
 )
 
 

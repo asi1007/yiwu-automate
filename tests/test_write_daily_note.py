@@ -77,3 +77,10 @@ class TestAppendUnderSection:
         # 新エントリは Claude Code ログ 内（あとのセクションより前）に入る
         assert text.index("- new") < text.index("## あとのセクション")
         assert text.index("- 旧") < text.index("- new")
+
+
+class TestDefaultDailyDir:
+    def test_points_to_main_daily(self):
+        from write_daily_note import DEFAULT_DAILY_DIR
+
+        assert DEFAULT_DAILY_DIR.parts[-3:] == ("obsidian", "main", "daily")
