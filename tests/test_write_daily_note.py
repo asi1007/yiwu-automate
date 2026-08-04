@@ -50,19 +50,27 @@ class TestAppendUnderSection:
         # 既存エントリが新エントリより前にある
         assert text.index("08:00") < text.index("09:05")
 
-    def test_output_has_no_blank_lines(self, tmp_path: Path):
+    def test_appended_entry_has_no_blank_lines(self, tmp_path: Path):
+        from write_daily_note import append_under_section
+
+        path = append_under_section(
+            SECTION, "アラート", ["- b", "   ", "", "- c"], NOW, tmp_path
+        )
+        text = path.read_text(encoding="utf-8")
+        entry = text[text.index("### 09:05 - アラート") :]
+        assert entry.splitlines() == ["### 09:05 - アラート", "- b", "- c"]
+
+    def test_preserves_existing_blank_lines_written_by_others(self, tmp_path: Path):
         from write_daily_note import append_under_section
 
         p = tmp_path / "2026-07-28.md"
-        p.write_text(
-            "# 2026-07-28\n\n## Claude Code ログ\n\n### 08:00 - 既存\n- a\n\n",
-            encoding="utf-8",
-        )
-        path = append_under_section(SECTION, "アラート", ["- b"], NOW, tmp_path)
-        lines = path.read_text(encoding="utf-8").split("\n")
-        # 末尾の改行由来の空要素を除き、空白行が1つも無い
-        assert [l for l in lines if l.strip() == "" and l != ""] == []
-        assert "" not in [l for l in lines[:-1]]
+        original = "# 2026-07-28\n\n## Claude Code ログ\n\n### 08:00 - 既存\n- a\n\n## 他人のセクション\n\n- 人間が書いた行\n"
+        p.write_text(original, encoding="utf-8")
+        append_under_section(SECTION, "アラート", ["- b"], NOW, tmp_path)
+        text = p.read_text(encoding="utf-8")
+        assert "# 2026-07-28\n\n## Claude Code ログ\n" in text
+        assert "## 他人のセクション\n\n- 人間が書いた行\n" in text
+        assert text.count("\n\n") == original.count("\n\n")
 
     def test_inserts_within_section_before_following_section(self, tmp_path: Path):
         from write_daily_note import append_under_section
@@ -84,3 +92,54 @@ class TestDefaultDailyDir:
         from write_daily_note import DEFAULT_DAILY_DIR
 
         assert DEFAULT_DAILY_DIR.parts[-3:] == ("obsidian", "main", "daily")
+
+
+class TestLocking:
+    def test_uses_shared_lock_file_in_daily_dir(self, tmp_path: Path):
+        from write_daily_note import LOCK_FILENAME, append_under_section
+
+        append_under_section(SECTION, "アラート", ["- b"], NOW, tmp_path)
+        assert (tmp_path / LOCK_FILENAME).exists()
+        assert LOCK_FILENAME == ".daily_note.lock"
+
+    def test_concurrent_appends_do_not_lose_entries(self, tmp_path: Path):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from write_daily_note import append_under_section
+
+        def run(minute: int) -> None:
+            append_under_section(
+                SECTION, f"アラート{minute}", [f"- {minute}"], NOW.replace(minute=minute), tmp_path
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(run, range(8)))
+
+        text = (tmp_path / "2026-07-28.md").read_text(encoding="utf-8")
+        assert all(f"アラート{minute}" in text for minute in range(8))
+
+    def test_holds_lock_across_read_and_write(self, tmp_path: Path):
+        import fcntl
+
+        import write_daily_note
+
+        observed: list[bool] = []
+        original = write_daily_note._insert_under_section
+
+        def spy(doc_lines: list[str], section_title: str, entry: list[str]) -> list[str]:
+            with (tmp_path / write_daily_note.LOCK_FILENAME).open("r") as probe:
+                try:
+                    fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    observed.append(False)
+                    fcntl.flock(probe, fcntl.LOCK_UN)
+                except BlockingIOError:
+                    observed.append(True)
+            return original(doc_lines, section_title, entry)
+
+        write_daily_note._insert_under_section = spy
+        try:
+            write_daily_note.append_under_section(SECTION, "アラート", ["- b"], NOW, tmp_path)
+        finally:
+            write_daily_note._insert_under_section = original
+
+        assert observed == [True]

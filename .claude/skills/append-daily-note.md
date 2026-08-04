@@ -26,7 +26,7 @@ python write_daily_note.py \
 - `--section`：追記先のセクション見出し（例 `## Claude Code ログ`）。無ければ新規作成する
 - `--title`：エントリ見出し。`### HH:MM - <title>` として追記される（時刻は実行時刻）
 - `--line`：本文の行。複数指定可（順序どおり）
-- `--daily-dir`：daily ディレクトリ（省略時は `~/Documents/automation/obsidian/daily`）
+- `--daily-dir`：daily ディレクトリ（省略時は `~/Documents/automation/obsidian/main/daily`）
 
 ## 処理内容
 
