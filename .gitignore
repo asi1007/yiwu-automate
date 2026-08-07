@@ -39,3 +39,11 @@ Thumbs.db
 .coverage
 htmlcov/
 
+
+# 鍵のバックアップ・差し替え用（本体と同じく追跡しない）
+service_account*.json
+service_account.json.backup
+
+# ブラウザ操作の作業ファイル・セッション記録
+.playwright-mcp/
+.entire/
