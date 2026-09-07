@@ -34,6 +34,10 @@ handler.setFormatter(JsonFormatter())
 logging.basicConfig(level=logging.INFO, handlers=[handler])
 logger = logging.getLogger(__name__)
 
+ANNOUNCEMENT_BUTTON_LABEL = "既読にする"
+ANNOUNCEMENT_BUTTON_SELECTOR = f'div.q-dialog:visible button:has-text("{ANNOUNCEMENT_BUTTON_LABEL}")'
+MAX_ANNOUNCEMENT_DISMISSALS = 5
+
 
 class BuyerCentralScraper:
     BASE_URL = "https://yp.buyer-central.com"
@@ -66,6 +70,20 @@ class BuyerCentralScraper:
             logger.info("ログイン完了")
         except Exception:
             raise RuntimeError("ログインに失敗しました。認証情報を確認してください。")
+
+    @staticmethod
+    async def dismiss_mandatory_announcements(page) -> int:
+        dismissed = 0
+        for _ in range(MAX_ANNOUNCEMENT_DISMISSALS):
+            button = page.locator(ANNOUNCEMENT_BUTTON_SELECTOR)
+            if await button.count() == 0:
+                break
+            await button.first.click()
+            dismissed += 1
+            await asyncio.sleep(1)
+        if dismissed:
+            logger.info(f"必読お知らせを{dismissed}件「{ANNOUNCEMENT_BUTTON_LABEL}」で閉じました")
+        return dismissed
 
     @staticmethod
     def _parse_warehouse_date(date_text: str) -> str:
@@ -175,6 +193,7 @@ class BuyerCentralScraper:
             await page.goto(self.ORDER_LIST_URL)
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
+            await self.dismiss_mandatory_announcements(page)
             orders: dict[str, dict[str, str]] = {}
             for tab_pattern in self.RECEIVED_TAB_PATTERNS:
                 orders.update(await self._scrape_tab(page, tab_pattern))
