@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv
 import google_sheet
 import write_daily_note
+from todoist_notifier import HttpTodoistClient, TodoistNotifier
 
 load_dotenv()
 
@@ -229,6 +230,21 @@ def _report_overdue_orders(sheet: google_sheet.GSheet) -> None:
         logger.info(f"到着遅延アラートを daily note に追記しました: {path}")
     except Exception as e:
         logger.error(f"daily note への追記に失敗しました: {e}")
+    _push_overdue_to_todoist(overdue)
+
+
+def _push_overdue_to_todoist(overdue: list[dict]) -> None:
+    """遅延分を Todoist にも載せる。daily note は流れるがタスクは残る"""
+    api_token = os.getenv("TODOIST_API_TOKEN", "").strip()
+    project_id = os.getenv("TODOIST_PROJECT_ID", "").strip()
+    if not (api_token and project_id):
+        logger.info("TODOIST_API_TOKEN / TODOIST_PROJECT_ID が未設定のため Todoist 連携をスキップします")
+        return
+    try:
+        notifier = TodoistNotifier(HttpTodoistClient(api_token), project_id)
+        notifier.notify(overdue)
+    except Exception as e:
+        logger.error(f"Todoist への登録に失敗しました: {e}")
 
 
 async def main():

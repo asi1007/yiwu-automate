@@ -65,3 +65,31 @@ gcloud builds submit --config cloudbuild.yaml
 - Google Sheets integration requires service account with Sheets and Drive API permissions
 - Drive monitor watches for OCS files (tracking in G2, ASIN in G17+) and TW files (tracking in A12, ASIN in K16+)
 - Processed data is written to the "invoice" sheet with filename, file type, tracking number, and ASIN list
+
+## 到着遅延アラート（daily note + Todoist）
+
+`_report_overdue_orders` が **購入から 14 日超・未発送・到着日が空**の注文を集約し、2 箇所へ出す。
+
+| 出力先 | 何のため |
+|---|---|
+| daily note「## Claude Code ログ」 | その日の記録。**流れて消える** |
+| **Todoist（プロジェクト `benrii`）** | 対応するまで残る。優先度 3 |
+
+### 重複を作らない
+
+毎朝 6 時に走るので、**同じ注文でタスクを増やさない**。
+`find_existing_task` が本文の `[到着遅延]` マーカーと**注文番号**で既存タスクを探し、
+
+- 無ければ作る
+- あって経過日数が変わっていれば**本文を書き換える**（`42日経過` を最新に）
+- 変わっていなければ何もしない
+
+注文番号が空の行は**商品名の先頭 40 文字**で同一性を見る。仕入管理には注文番号が無い行が実在する
+（2026-03-21 のジュエリー袋 5 行など）。
+
+### 設定
+
+`.env` に `TODOIST_API_TOKEN` と `TODOIST_PROJECT_ID` を置く。**未設定ならスキップして本処理は止めない。**
+Todoist API は **`/api/v1/`**（`/rest/v2/` は 410）。
+
+タスクを完了しても、到着日が空のままなら翌朝また作られる。**到着日を埋めるのが本来の解消**。
